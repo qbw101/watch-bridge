@@ -1,0 +1,11 @@
+{
+  "host": "0.0.0.0",
+  "port": 8787,
+  "token": "",
+  "crypto": "gcm",
+  "sticker_px": 72,
+  "media_px": 128,
+  "open_page": "first",
+  "setup_done": false,
+  "setup_at": ""
+}

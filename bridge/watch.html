@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="uiTKzF0xxnenpOuTl8MazF">
+<head data-page-node-id="d2tf5DJLCpaPGxeGXgA4WX">
+<meta charset="utf-8" data-page-node-id="xrl8oNU7p36rHgAMvnrBc6">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" data-page-node-id="LINDwYvMPHgfgusOmBaBSe">
+<meta name="theme-color" content="#000000" data-page-node-id="themeColorNode">
+<title>抖音手表助手</title>
+<script>
+  /* 决定「手表全屏」还是「电脑预览外壳」。
+     ------------------------------------------------------------------
+     不能用视口宽度判断：手表浏览器一旦以「桌面版网页」渲染，布局视口会被撑到
+     980px，@media (min-width:620px) 就在手表上命中了，于是手表套上了本该只在
+     电脑上出现的预览外壳（黑边圆盘 + 底部「圆形表盘预览」提示），看起来就是
+     "显示的是电脑画面"。
+
+     判据改成 UA 白名单 + 物理屏幕兜底：只有确实是桌面电脑才启用预览外壳。
+     默认（判定不出来、脚本没跑）一律按手表全屏，宁可在电脑上看成全屏，
+     也不要在手表上套错外壳。
+     URL 上还可以手动覆盖：?full=1 强制全屏，?preview=1 强制套壳。 */
+  (function () {
+    var ua = navigator.userAgent || "";
+    var desktopUA = /Windows NT|Macintosh|Mac OS X|X11|CrOS/i.test(ua);
+    var mobileUA = /Android|iPhone|iPad|iPod|HarmonyOS|Harmony|Mobile|Handheld|Watch|Wear|Kindle/i.test(ua);
+    var sw = screen.width || 0, sh = screen.height || 0;
+    var tinyScreen = (sw > 0 && sw <= 700 && sh > 0 && sh <= 700);   // 手表/手环物理像素很小
+    var preview = desktopUA && !mobileUA && !tinyScreen;
+    var q = "";
+    try { q = String(window.location.search || ""); } catch (e) { q = ""; }
+    if (q.indexOf("full=1") >= 0) { preview = false; }
+    if (q.indexOf("preview=1") >= 0) { preview = true; }
+    window.__WATCH_IS_PREVIEW__ = preview;
+    if (preview) { document.documentElement.className += " preview"; }
+
+    /* 个别手表浏览器切到「桌面版网页」时会忽略 viewport meta，把布局视口撑到 980，
+       整页被等比例缩小、按钮变得极小。非预览模式下一旦发现视口比物理屏幕宽很多，
+       就按屏幕像素重新声明一次 viewport（判定不出来时不动，避免误伤）。 */
+    function fixViewport() {
+      if (preview) { return; }
+      var meta = document.querySelector('meta[name="viewport"]');
+      var swv = screen.width || 0, vw = window.innerWidth || 0;
+      if (meta && swv > 0 && vw > swv * 1.25) {
+        meta.setAttribute("content",
+          "width=" + swv + ", initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover");
+      }
+    }
+    fixViewport();
+    window.addEventListener("load", fixViewport);
+  })();
+</script>
+<style>
+  /* ==========================================================================
+     圆形表盘适配（华为 Watch 5：466×466 圆屏）
+     --------------------------------------------------------------------------
+     圆形屏幕上「四角是物理不存在的区域」，所以不能沿用方形布局。这里用几何
+     约束来定位，而不是靠 padding 猜：
+
+       半径 r = 233（466 的圆）
+       圆的方程：与圆心距离 > r 的像素看不见
+       内接正方形边长 = 466 / √2 ≈ 330  → 任何落在这个 330×330 中心方块里的
+       元素，无论屏幕是不是圆的都一定完整可见。
+
+     因此：
+       --r     = min(50vw, 50vh) 半径（自适应其它尺寸的圆屏）
+       内容列宽 = r × 1.42 ≈ 330px（内接正方形，列内内容 100% 可见）
+       顶部信息胶囊 / 底部圆形按钮 / 输入卡片，全部按 r 的比例居中摆放，
+       并用 scripts 侧的几何校验脚本逐个元素验算（见 artifacts 报告）。
+
+     垂直方向统一以 50% 为基准做偏移，这样即使手表浏览器给了非正方形视口
+     （例如底部有系统条），整套布局仍围绕表盘圆心居中。
+     ========================================================================== */
+  :root {
+    --bg: #000000;
+    --panel: #0d0f12;
+    --panel-2: #171b21;
+    --line: #262c34;
+    --text: #f2f5f8;
+    --muted: #8b95a3;
+    --accent: #fe2c55;
+    --accent-2: #25f4ee;
+    --ok: #34d399;
+    --warn: #fbbf24;
+
+    --r: min(50vw, 50vh);            /* 表盘半径 */
+    /* 内容列宽 = 内接正方形的里侧留 10px 余量。
+       半径 233 时：宽 310 的列可以安全跨越 y=73~393（高 320），四角余量约 10px；
+       再宽就要被迫变矮，反而放不下东西。 */
+    --col: calc(var(--r) * 1.33);              /* 内容列宽（≈310px） */
+    --band-top: calc(50% - var(--r) * 0.686);  /* 内容带上沿（≈y73） */
+    --band-h: calc(var(--r) * 1.373);          /* 内容带高度（≈320px） */
+    --band-pad-top: calc(var(--r) * 0.17);     /* 让内容从顶部胶囊下方开始（≈40px） */
+    --fab: calc(var(--r) * 0.33);              /* 圆形按钮直径（≈76px） */
+    --fab-top: calc(50% + var(--r) * 0.57);    /* 圆形按钮上沿（≈y366） */
+    /* 顶部胶囊比内容带窄一点点：它在圆的「弦」更短的高处，且自身圆角会往外顶。
+       约束解 sqrt((col/2-rr)^2 + (CY-t-rr)^2) + rr <= r；r=233/t=46/rr=30 时上限约
+       317px，这里取 300px（余量约 6px）。 */
+    --pill-w: calc(var(--r) * 1.29);           /* 顶部胶囊宽度（≈300px） */
+    --pill-h: calc(var(--r) * 0.26);           /* 顶部胶囊高度（≈60px） */
+    --pill-top: calc(50% - var(--r) * 0.803);  /* 顶部胶囊上沿（≈y46） */
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "HarmonyOS Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ---------------- 舞台 / 表盘 ---------------- */
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  #device { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+  /* 视口接近正方形时按真圆裁切：真机上与表盘物理边界重合（无害），
+     方形视口的调试浏览器里则能真实还原「四角看不见」的效果。 */
+  @media (min-aspect-ratio: 5/6) and (max-aspect-ratio: 6/5) {
+    #device { border-radius: 50%; }
+  }
+
+  /* 圆屏几何统一由 --r（表盘半径）推导，见 :root 里的变量表。
+     真机上视口就是表盘，:root 的默认值 min(50vw,50vh) 已经正确；
+     电脑上套表盘外壳预览时 vw 指向整个窗口会算偏，所以页面启动时会用 JS 实测
+     #device 尺寸，把 --r 以及**全部派生变量**一起覆盖成精确像素值
+     （为什么必须连派生变量一起覆盖，见脚本 fitRadius 的注释）。 */
+
+  #app { position: relative; width: 100%; height: 100%; }
+  .hidden { display: none !important; }
+
+  /* ---------------- 顶部信息胶囊（圆屏顶部只能是窄的居中内容） ---------------- */
+  .pill {
+    position: absolute;
+    left: 50%; top: var(--pill-top); transform: translateX(-50%);
+    width: var(--pill-w); height: var(--pill-h);
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 12px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 999px;
+    z-index: 12;
+  }
+  .pill h1 {
+    margin: 0; flex: 1 1 auto; min-width: 0;
+    font-size: 25px; font-weight: 700; letter-spacing: .3px;
+    text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--warn); flex: 0 0 auto; }
+  .dot.ok { background: var(--ok); }
+  .dot.bad { background: var(--accent); }
+
+  button {
+    font-family: inherit; color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 999px;
+    font-size: 22px; padding: 0 18px; min-height: 54px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  button:active { background: #232a33; transform: scale(.96); }
+  button.primary { background: var(--accent); border-color: var(--accent); font-weight: 700; }
+  button.ghost { background: transparent; }
+  button.icon {
+    width: 44px; height: 44px; min-height: 44px; padding: 0; flex: 0 0 auto;
+    font-size: 24px; border-radius: 50%;
+  }
+  button[disabled] { opacity: .45; }
+
+  /* ---------------- 滚动内容带（严格落在内接正方形内） ---------------- */
+  .band {
+    position: absolute;
+    left: 50%; top: var(--band-top); transform: translateX(-50%);
+    width: var(--col); height: var(--band-h);
+    padding-top: var(--band-pad-top);
+    overflow-y: auto; overflow-x: hidden;
+    overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  }
+  .band::-webkit-scrollbar { width: 0; }
+  /* 圆屏上内容被「直线」截断会显得生硬（表盘本身是弧线），上下各加一段渐隐：
+     顶部那段还能盖住「内容从胶囊圆角缺口里露出来的硬切边」（胶囊是圆角的，
+     它在左右两角下方盖不住滚动上来的内容）。内容带顶部留了 40px 内边距，
+     静止时首条内容在 y≈113，落在渐隐区之外，不会被误伤。
+     底部渐隐同时暗示「下面还有内容」。 */
+  .band {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 30px), transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 30px), transparent 100%);
+  }
+  /* 会话页：底部只需给圆形按钮留一点净空（按钮上沿在 y≈366，内容带下沿 y≈393），
+     留多了最新一条会停得过高、和按钮之间空一大块。 */
+  .band.messages { padding-bottom: calc(var(--r) * 0.155); }
+
+  /* ---------------- 好友列表 ---------------- */
+  .friend {
+    display: flex; align-items: center; gap: 12px;
+    width: 100%; min-height: 78px; margin-bottom: 8px;
+    padding: 0 18px; font-size: 25px; text-align: left;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+  }
+  .friend:last-child { margin-bottom: 0; }
+  .friend .avatar {
+    width: 46px; height: 46px; border-radius: 50%;
+    background: linear-gradient(140deg, var(--accent), var(--accent-2));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 700; color: #07090c; flex: 0 0 auto;
+  }
+  .friend .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .friend .arrow { color: var(--muted); font-size: 22px; flex: 0 0 auto; }
+
+  /* ---------------- 聊天 ---------------- */
+  .messages { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 4px; }
+  .bubble {
+    width: fit-content; max-width: 84%;
+    padding: 9px 14px; font-size: 23px; line-height: 1.3;
+    border-radius: 20px; word-break: break-word; white-space: pre-wrap;
+  }
+  .bubble.me { margin-left: auto; background: var(--accent); color: #fff; border-bottom-right-radius: 7px; }
+  .bubble.them { margin-right: auto; background: var(--panel-2); border: 1px solid var(--line); border-bottom-left-radius: 7px; }
+  .bubble.media { font-style: italic; color: var(--muted); padding: 5px; }
+  .bubble.me.media { color: #ffe3ea; }
+  /* 表情图固定尺寸：异步解码时不会改变高度，否则滚动位置会被顶走、看不到最新消息 */
+  .bubble img.media-img {
+    display: block; width: min(96px, calc(var(--r) * 0.42)); height: min(96px, calc(var(--r) * 0.42));
+    object-fit: contain; border-radius: 12px; background: #0a0c10;
+  }
+  .bubble.pending { opacity: .55; }
+  .stamp { font-size: 16px; color: var(--muted); margin: 0 8px; }
+  .stamp.me { text-align: right; }
+  .time-sep {
+    width: fit-content; margin: 4px auto; font-size: 19px; color: var(--muted);
+    background: var(--panel); border-radius: 999px; padding: 3px 14px;
+  }
+  .empty { color: var(--muted); font-size: 21px; text-align: center; padding: 40px 12px; line-height: 1.5; }
+
+  /* ---------------- 底部圆形按钮（圆屏下沿唯一的可点击区域） ---------------- */
+  .fab {
+    position: absolute; left: 50%; top: var(--fab-top);
+    transform: translateX(-50%);
+    width: var(--fab); height: var(--fab); min-height: 0; padding: 0;
+    border-radius: 50%; font-size: 32px; line-height: 1;
+    background: var(--accent); border-color: var(--accent); color: #fff;
+    box-shadow: 0 6px 18px rgba(254, 44, 85, .35);
+    z-index: 12;
+  }
+  .fab.ghost { background: var(--panel-2); border-color: var(--line); color: var(--text); box-shadow: none; }
+
+  /* ---------------- 发送面板：圆屏用「居中卡片」而不是贴底输入条 ----------------
+     贴底的横向输入条在圆形下沿会被裁得只剩中间一小段，必须在圆心附近弹卡片。 */
+  .sheet {
+    position: absolute; inset: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, .72);
+  }
+  .sheet-card {
+    width: calc(var(--r) * 1.33);      /* ≈310px：内接正方形的里侧，四角不会被裁 */
+    max-height: calc(var(--r) * 1.42);
+    overflow-y: auto;
+    padding: 16px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: calc(var(--r) * 0.17);
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .sheet-title {
+    font-size: 20px; color: var(--muted); text-align: center;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sheet-title b { color: var(--text); }
+  /* ---------------- 表情选择：缩略图网格 ----------------
+     抖音表情的名字很多都叫「表情」，靠文字根本分不清是哪个，所以有图就显示图。
+     高度交给 flex 撑满卡片剩余空间，超出在网格内部滚动 —— 表情再多也不会把
+     输入框挤出圆屏。没有缩略图的项退化成文字格子（有些表情图是雪碧图，抓不到）。 */
+  .stickers {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    max-height: calc(var(--r) * 0.55);
+    padding: 2px;
+  }
+  .stickers .empty {
+    grid-column: 1 / -1;
+    font-size: 18px; color: var(--muted); text-align: center; padding: 10px 0;
+  }
+  .sticker {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; min-height: 0; padding: 4px; margin: 0;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: calc(var(--r) * 0.09);
+    color: var(--text); font-family: inherit; font-size: 15px;
+  }
+  .sticker img {
+    display: block; width: 100%; height: auto;
+    max-height: calc(var(--r) * 0.125);
+    object-fit: contain;
+  }
+  .sticker span {
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--muted);
+  }
+  /* 有图时文字只作为兜底说明，压到最小 */
+  .sticker.with-img span { font-size: 12px; line-height: 1.1; }
+  .inputrow { display: flex; gap: 8px; align-items: stretch; }
+  .inputrow input {
+    flex: 1 1 auto; min-width: 0; font-family: inherit; font-size: 21px;
+    color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 999px; padding: 0 16px; min-height: 54px;
+  }
+  .inputrow input::placeholder { color: var(--muted); }
+  .inputrow button { flex: 0 0 auto; min-height: 54px; }
+
+  /* ---------------- 提示 ---------------- */
+  .toast {
+    position: absolute; left: 50%; top: calc(50% + var(--r) * 0.30);
+    transform: translateX(-50%);
+    max-width: calc(var(--r) * 1.25); padding: 10px 18px; border-radius: 999px;
+    font-size: 20px; text-align: center;
+    background: #1f2630; border: 1px solid var(--line); color: var(--text);
+    opacity: 0; transition: opacity .2s ease; pointer-events: none; z-index: 30;
+  }
+  .toast.show { opacity: 1; }
+  .toast.error { background: #3a1420; border-color: #7f1d33; }
+  .toast.ok { background: #10281f; border-color: #1d5f45; }
+
+  /* ---------------- 启动 / 令牌 ---------------- */
+  .center {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: calc(var(--r) * 1.33); max-height: calc(var(--r) * 1.42);
+    overflow-y: auto;
+    display: flex; flex-direction: column; justify-content: center; gap: 12px;
+  }
+  .center p { margin: 0; font-size: 21px; color: var(--muted); line-height: 1.45; text-align: center; }
+  .center input {
+    width: 100%; font-family: inherit; font-size: 22px; color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 999px; padding: 0 16px; min-height: 54px; text-align: center;
+  }
+  .spinner {
+    width: 38px; height: 38px; border-radius: 50%; align-self: center;
+    border: 4px solid var(--line); border-top-color: var(--accent);
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---------------- 电脑上打开时：套一个圆形表盘外壳，所见即手表所见 ----------------
+     由页面最顶部那段脚本给 <html> 加 .preview 来决定，**不再用视口宽度判断**
+     （手表浏览器的桌面模式会把视口撑到 980，媒体查询会误命中，手表上就会显示成
+      电脑预览的样子）。手表上 html 上没有 .preview，下面这些规则一律不生效。 */
+  #frameHint { display: none; }
+  .preview body { background: #0a0b0d; }
+  .preview #stage { flex-direction: column; gap: 26px; }
+  .preview #device {
+    /* 外层 494 = 466 内容区 + 2×14 边框（全局 box-sizing:border-box），
+       这样预览里的内容区正好是真的 466×466，几何比例与真机完全一致。 */
+    width: 494px; height: 494px; flex: 0 0 auto;
+    border-radius: 50%; border: 14px solid #1c2027;
+    box-shadow: 0 0 0 2px #2f353d, 0 24px 60px rgba(0, 0, 0, .75);
+  }
+  .preview #frameHint {
+    display: block; color: #6b7683; font-size: 15px; text-align: center; line-height: 1.7;
+  }
+  .preview #frameHint code { color: #9fb0c0; }
+  .preview #frameHint b { color: #c8d2dc; font-weight: 600; }
+  /* 预览窗口很窄时（缩小的电脑窗口）圆盘按窗口等比缩，避免溢出 */
+  @media (max-width: 560px), (max-height: 560px) {
+    .preview #device { width: 92vw; height: 92vw; border-width: 10px; }
+  }
+</style>
+</head>
+<body data-page-node-id="1hi259J78QUCO5E2yC4rDf">
+<div id="stage">
+<div id="device">
+<div id="app" data-page-node-id="zNkUf5TJkUstJinvIC5Q80">
+
+  <!-- 连接中 / 需要令牌 -->
+  <section id="bootView" class="center" data-page-node-id="gje50awKTO5b7wcLYF1ftx">
+    <div class="spinner" id="bootSpinner" data-page-node-id="UmE2pPokc4BghDdZjpCCGU"></div>
+    <p id="bootText" data-page-node-id="zVteUtp1tMGAPF4q2gWYsZ">正在连接电脑上的抖音…</p>
+    <div id="tokenBox" class="hidden" data-page-node-id="yA2HjTNcuFbz6SfCDCwNsM">
+      <p data-page-node-id="xTQ508diktDHrpaF4GzZYF">请输入访问令牌</p>
+      <input id="tokenInput" type="text" inputmode="latin" autocomplete="off" placeholder="令牌" data-page-node-id="QZUoJxaw1pIXTXCf9ViOuJ">
+      <button class="primary" style="width:100%;margin-top:10px;border-radius:999px" onclick="saveToken()" data-page-node-id="TDQoJulwoeM1BHkVU0QF63">连接</button>
+    </div>
+  </section>
+
+  <!-- 好友列表 -->
+  <section id="listView" class="hidden" data-page-node-id="jTfftcqyJSOTMlJlWFYWZU">
+    <div class="pill" data-page-node-id="fF6H1HUDTAjVqoS9KmPyDQ">
+      <span class="dot" id="listDot" data-page-node-id="uHrNmyJ5HFenJ80OhVmTRy"></span>
+      <h1 data-page-node-id="T43zdzMdg3kb59BurBvpSr">抖音消息</h1>
+      <button class="icon ghost" onclick="loadStatus(true)" title="刷新" data-page-node-id="EBldL9OYguAqySgMQ1JtFF">⟳</button>
+    </div>
+    <div class="band" id="friendList" data-page-node-id="A3TWQGGXRfsyHQCxNZRVaO"></div>
+  </section>
+
+  <!-- 聊天 -->
+  <section id="chatView" class="hidden" data-page-node-id="5EmmtkBWREg70MNk74aZuV">
+    <div class="pill" data-page-node-id="ddQ6CA3fx6KYBVooPCVFcP">
+      <button class="icon ghost" onclick="backToList()" title="返回" data-page-node-id="9xOZkD6bcMmlOyEfzg8ypF">‹</button>
+      <h1 id="chatTitle" data-page-node-id="OhLZcF26agxOBdxnhEYC2G">会话</h1>
+      <span class="dot ok" id="chatDot" data-page-node-id="0FmxAQvAfKfwMzT9DQYiJj"></span>
+      <button class="icon ghost" onclick="refreshChat()" title="刷新" data-page-node-id="vWngPFARhhBXxKH6cvLVHF">⟳</button>
+    </div>
+    <div class="band messages" id="messageList" data-page-node-id="9seNOccvmwhf1c4YxmIhPG"></div>
+    <button class="fab" id="composeBtn" onclick="openComposer()" title="发送消息">✎</button>
+  </section>
+
+  <!-- 发送面板（居中卡片，圆屏下四角不会被裁） -->
+  <section id="composer" class="sheet hidden" data-page-node-id="IhR4wmmLdogCC5AZnpkHJW">
+    <div class="sheet-card" data-page-node-id="mpZahMLzNOcOjo5RA9D3DH">
+      <div class="sheet-title">发送给 <b id="composerName"></b></div>
+      <div class="stickers" id="stickerGrid" data-page-node-id="tdsPnaniAwmG45kQLz6LQQ"></div>
+      <div class="inputrow">
+        <input id="textInput" type="text" autocomplete="off" placeholder="输入消息…"
+               onkeydown="if(event.key==='Enter'){sendText()}" data-page-node-id="Fc6m0Cuv8bTmlxakY72iB8">
+        <button class="primary" id="sendBtn" onclick="sendText()" data-page-node-id="uwH6SkbRuZVxbl6czFJC2A">发送</button>
+      </div>
+      <button class="ghost" style="width:100%;border-radius:999px" onclick="closeComposer()" data-page-node-id="composerCancel">取消</button>
+    </div>
+  </section>
+</div>
+</div>
+<div id="frameHint">
+  <b>这是电脑上的圆形表盘预览外壳</b> · 内容区 466×466<br>
+  手表浏览器直接打开 <code id="frameUrl"></code><br>
+  <span id="frameDiag"></span><br>
+  <a id="frameFull" href="#" style="color:#9fb0c0">在手表上看到这一行？点这里强制全屏</a>
+</div>
+</div>
+<div class="toast" id="toast" data-page-node-id="7SH9hOPVk1fZWYSHGJaSHN"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ------------------------------------------------------------- 圆屏几何
+  //
+  // --r（表盘半径）决定所有定位参数。CSS 里默认用 min(50vw,50vh)，这在真机上
+  // 是对的（视口=表盘），但电脑上套外壳预览时 vw 会指向整个窗口，于是整套布局
+  // 被放大、内容顶出圆外。
+  //
+  // 注意这里必须把「派生变量」也一起写上去，不能只覆盖 --r：
+  // 嵌套在自定义属性里的 var() 是在「声明该属性的元素」上求值的，:root 上的
+  // --col: calc(var(--r) * 1.33) 永远用 :root 自己的 --r，在 #device 上覆盖 --r
+  // 对它无效（实测：--r 读到 233px，--col 却算成 478.8px = 1.33 × 360）。
+  // 全部写在与 --r 同一层的 #device 上，两种求值规则都得到正确结果。
+  function fitRadius() {
+    var device = document.getElementById("device");
+    if (!device) { return; }
+    var w = device.clientWidth, h = device.clientHeight;   // 不含边框
+    if (!(w > 0 && h > 0)) { return; }
+    var r = Math.min(w, h) / 2;
+    function px(v) { return (Math.round(v * 1000) / 1000) + "px"; }
+    device.style.setProperty("--r", px(r));
+    device.style.setProperty("--col", px(r * 1.33));
+    device.style.setProperty("--band-h", px(r * 1.373));
+    device.style.setProperty("--band-pad-top", px(r * 0.17));
+    device.style.setProperty("--fab", px(r * 0.33));
+    device.style.setProperty("--pill-w", px(r * 1.29));
+    device.style.setProperty("--pill-h", px(r * 0.26));
+    // 含 50% 的两个量：百分比留给元素自己按容器高度解析，像素部分在这里算好
+    device.style.setProperty("--band-top", "calc(50% - " + px(r * 0.686) + ")");
+    device.style.setProperty("--fab-top", "calc(50% + " + px(r * 0.57) + ")");
+    device.style.setProperty("--pill-top", "calc(50% - " + px(r * 0.803) + ")");
+  }
+  fitRadius();
+  window.addEventListener("resize", fitRadius);
+  window.addEventListener("orientationchange", fitRadius);
+
+  var TOKEN_KEY = "douyin_watch_token";
+  // v2：列表缓存里多了表情库字段，旧缓存没有它会渲染出空面板。
+  var LIST_CACHE_KEY = "douyin_watch_list_v2";
+  var POLL_ACTIVE_MS = 2000;   // 屏幕亮着时的轮询间隔
+  var POLL_IDLE_MS = 15000;    // 息屏/切后台时的间隔，省电
+  var MAX_CHAT_CACHE = 3;      // 内存里保留最近几个会话，回去时秒开
+
+  var state = {
+    token: "",
+    friends: [],
+    presets: [],
+    stickers: [],
+    current: null,
+    busy: false,
+    inflight: false,
+    timer: null,
+    rev: "",
+    sigs: [],
+    groups: [],
+    lastMessages: [],
+    chats: {}
+  };
+
+  function $(id) { return document.getElementById(id); }
+
+  function store(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) { /* 隐私模式等，忽略 */ }
+  }
+  function load(key) {
+    try { return localStorage.getItem(key); } catch (e) { return null; }
+  }
+
+  function tokenFromUrl() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      return (params.get("token") || "").trim();
+    } catch (e) { return ""; }
+  }
+
+  function readToken() {
+    var urlToken = tokenFromUrl();
+    if (urlToken) { store(TOKEN_KEY, urlToken); return urlToken; }
+    return (load(TOKEN_KEY) || "").trim();
+  }
+
+  function saveToken() {
+    var value = ($("tokenInput").value || "").trim();
+    if (!value) { toast("请先输入令牌", "error"); return; }
+    store(TOKEN_KEY, value);
+    state.token = value;
+    loadStatus(true);
+  }
+
+  function api(path, options) {
+    var opts = options || {};
+    var url = path + (path.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(state.token);
+    var init = { method: opts.method || "GET", headers: { "X-Auth-Token": state.token } };
+    if (opts.body) {
+      init.headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(opts.body);
+    }
+    return fetch(url, init).then(function (resp) {
+      return resp.text().then(function (text) {
+        var data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { error: "返回内容无法解析" }; }
+        if (!resp.ok) {
+          var err = new Error(data.error || ("请求失败 " + resp.status));
+          err.status = resp.status;
+          throw err;
+        }
+        return data;
+      });
+    });
+  }
+
+  var toastTimer = null;
+  function toast(message, kind) {
+    var el = $("toast");
+    el.textContent = message;
+    el.className = "toast show" + (kind ? " " + kind : "");
+    if (toastTimer) { clearTimeout(toastTimer); }
+    toastTimer = setTimeout(function () { el.className = "toast"; }, 3600);
+  }
+
+  function show(view) {
+    ["bootView", "listView", "chatView"].forEach(function (id) {
+      $(id).classList.toggle("hidden", id !== view);
+    });
+  }
+
+  function needsToken(message) {
+    $("bootSpinner").classList.add("hidden");
+    $("bootText").textContent = message || "无法连接电脑上的服务";
+    $("tokenBox").classList.remove("hidden");
+    show("bootView");
+  }
+
+  // ------------------------------------------------------------- 好友列表
+
+  function restoreCachedList() {
+    var raw = load(LIST_CACHE_KEY);
+    if (!raw) { return; }
+    try {
+      var data = JSON.parse(raw);
+      state.friends = data.friends || [];
+      state.presets = data.presets || [];
+      state.stickers = data.stickers || [];
+    } catch (e) { /* 缓存损坏就当没有 */ }
+  }
+
+  function loadStatus(userTriggered) {
+    if (!state.token) { needsToken(); return; }
+    var hasList = state.friends.length > 0;
+    if (!hasList) {
+      $("bootSpinner").classList.remove("hidden");
+      $("bootText").textContent = "正在连接电脑上的抖音…";
+      show("bootView");
+    } else {
+      $("listDot").className = "dot";
+    }
+
+    api("/api/status").then(function (data) {
+      if (!data.ready) {
+        $("listDot").className = "dot bad";
+        if (!hasList) {
+          $("bootSpinner").classList.add("hidden");
+          $("bootText").textContent = data.error || "抖音会话正在启动，请稍候";
+          $("tokenBox").classList.add("hidden");
+        }
+        setTimeout(function () { loadStatus(false); }, 4000);
+        return;
+      }
+      state.friends = data.friends || [];
+      state.presets = data.presets || [];
+      state.stickers = data.watch_stickers || [];
+      store(LIST_CACHE_KEY, JSON.stringify({
+        friends: state.friends,
+        presets: state.presets,
+        stickers: state.stickers
+      }));
+      renderFriends();
+      $("listDot").className = "dot ok";
+      show("listView");
+      if (userTriggered) { toast("已刷新", "ok"); }
+    }).catch(function (err) {
+      if (err.status === 401) { needsToken("令牌无效，请重新输入"); return; }
+      needsToken(err.message);
+    });
+  }
+
+  function initial(name) {
+    var ch = (name || "?").trim().charAt(0);
+    return ch || "?";
+  }
+
+  function renderFriends() {
+    var box = $("friendList");
+    box.innerHTML = "";
+    if (!state.friends.length) {
+      var empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "config.json 里还没有配置好友";
+      box.appendChild(empty);
+      return;
+    }
+    var fragment = document.createDocumentFragment();
+    state.friends.forEach(function (name) {
+      var btn = document.createElement("button");
+      btn.className = "friend";
+      var avatar = document.createElement("span");
+      avatar.className = "avatar";
+      avatar.textContent = initial(name);
+      var label = document.createElement("span");
+      label.className = "name";
+      label.textContent = name;
+      var arrow = document.createElement("span");
+      arrow.className = "arrow";
+      arrow.textContent = "›";
+      btn.appendChild(avatar);
+      btn.appendChild(label);
+      btn.appendChild(arrow);
+      btn.onclick = function () { openChat(name); };
+      fragment.appendChild(btn);
+    });
+    box.appendChild(fragment);
+  }
+
+  // ------------------------------------------------------------- 差量渲染
+  //
+  // 之前的实现每轮轮询都 innerHTML="" 重建整屏，于是每 6 秒：
+  //   * 所有表情图被重新创建 → 重新走网络（手表上体感就是「卡」）
+  //   * 滚动位置被重置到中间 → 看不到最新消息
+  // 现在按内容指纹做前缀对齐：只有真正新增/消失的消息才动 DOM，
+  // 已有元素（含已解码的图片）原样保留。
+
+  function messageSig(msg) {
+    var media = msg.media ? msg.media.split("?")[0].slice(-48) : "";
+    return [msg.side || "", msg.type || "", msg.time || "", msg.text || "", media].join("\u0001");
+  }
+
+  function alignSigs(oldSigs, newSigs) {
+    // 返回 {shift, reuse}：丢掉旧列表最前面 shift 个，其余前 reuse 个可以复用。
+    // shift 用来吸收「窗口向前滑动」（读取条数上限把最老的消息挤掉）的情况。
+    var best = { shift: 0, reuse: 0 };
+    var maxShift = Math.min(4, oldSigs.length, newSigs.length);
+    for (var shift = 0; shift <= maxShift; shift++) {
+      var n = 0;
+      while (shift + n < oldSigs.length && n < newSigs.length && oldSigs[shift + n] === newSigs[n]) { n++; }
+      if (n > best.reuse) { best = { shift: shift, reuse: n }; }
+    }
+    return best;
+  }
+
+  function buildMessageNodes(msg, pending) {
+    var nodes = [];
+    var isMe = msg.side === "me";
+    if (msg.time && msg.type !== "time") {
+      var stamp = document.createElement("div");
+      stamp.className = "stamp" + (isMe ? " me" : "");
+      stamp.textContent = msg.time;
+      nodes.push(stamp);
+    }
+    var el = document.createElement("div");
+    if (msg.type === "time") {
+      el.className = "time-sep";
+      el.textContent = msg.text;
+    } else {
+      el.className = "bubble " + (isMe ? "me" : "them");
+      if (msg.type !== "text") { el.className += " media"; }
+      if (pending) { el.className += " pending"; }
+      if (msg.media) {
+        var img = document.createElement("img");
+        img.className = "media-img";
+        img.alt = msg.text || "图片";
+        img.decoding = "async";
+        img.src = mediaUrl(msg.media);
+        img.onerror = function () {
+          el.classList.remove("media");
+          el.textContent = "[" + (msg.text || "图片") + "]";
+        };
+        el.appendChild(img);
+      } else {
+        el.textContent = msg.type === "text" ? msg.text
+          : (msg.type === "sticker" ? "[" + (msg.text || "表情") + "]" : "[图片]");
+      }
+    }
+    nodes.push(el);
+    return nodes;
+  }
+
+  function isPinned(box) {
+    return box.scrollHeight - box.scrollTop - box.clientHeight < 48;
+  }
+
+  function scrollToBottom(box) {
+    box.scrollTop = box.scrollHeight;
+    // 图片解码可能改变高度，补一次；尺寸已固定，通常不需要第二遍。
+    requestAnimationFrame(function () { box.scrollTop = box.scrollHeight; });
+  }
+
+  function clearMessages() {
+    $("messageList").innerHTML = "";
+    state.sigs = [];
+    state.groups = [];
+    state.lastMessages = [];
+  }
+
+  function showPlaceholder(text) {
+    clearMessages();
+    var el = document.createElement("div");
+    el.className = "empty";
+    el.textContent = text;
+    $("messageList").appendChild(el);
+  }
+
+  function applyMessages(messages, forceBottom) {
+    var box = $("messageList");
+    var pinned = forceBottom || isPinned(box) || state.groups.length === 0;
+
+    var stale = box.querySelectorAll(".empty");
+    for (var e = 0; e < stale.length; e++) { box.removeChild(stale[e]); }
+
+    var sigs = [];
+    for (var i = 0; i < messages.length; i++) { sigs.push(messageSig(messages[i])); }
+    var plan = alignSigs(state.sigs, sigs);
+
+    for (var s = 0; s < plan.shift; s++) {
+      var dropped = state.groups[s];
+      if (!dropped) { continue; }
+      for (var d = 0; d < dropped.nodes.length; d++) {
+        var node = dropped.nodes[d];
+        if (node.parentNode) { node.parentNode.removeChild(node); }
+      }
+    }
+
+    var kept = state.groups.slice(plan.shift, plan.shift + plan.reuse);
+    var fresh = [];
+    var fragment = document.createDocumentFragment();
+    for (var j = plan.reuse; j < messages.length; j++) {
+      var nodes = buildMessageNodes(messages[j], false);
+      for (var k = 0; k < nodes.length; k++) { fragment.appendChild(nodes[k]); }
+      fresh.push({ nodes: nodes, optimistic: false });
+    }
+    if (fragment.childNodes.length) { box.appendChild(fragment); }
+
+    state.groups = kept.concat(fresh);
+    state.sigs = sigs;
+    state.lastMessages = messages;
+
+    if (!messages.length) {
+      showPlaceholder("还没有消息");
+      return;
+    }
+    if (pinned) { scrollToBottom(box); }
+  }
+
+  function appendOptimistic(payload) {
+    var msg = {
+      side: "me",
+      type: payload.text ? "text" : "sticker",
+      text: payload.text || payload.sticker,
+      time: "",
+      media: null
+    };
+    var box = $("messageList");
+    var stale = box.querySelectorAll(".empty");
+    for (var e = 0; e < stale.length; e++) { box.removeChild(stale[e]); }
+    var nodes = buildMessageNodes(msg, true);
+    for (var i = 0; i < nodes.length; i++) { box.appendChild(nodes[i]); }
+    state.groups.push({ nodes: nodes, optimistic: true });
+    scrollToBottom(box);
+  }
+
+  function dropOptimistic() {
+    while (state.groups.length && state.groups[state.groups.length - 1].optimistic) {
+      var group = state.groups.pop();
+      for (var i = 0; i < group.nodes.length; i++) {
+        var node = group.nodes[i];
+        if (node.parentNode) { node.parentNode.removeChild(node); }
+      }
+    }
+  }
+
+  function mediaUrl(raw) {
+    return "/api/media?url=" + encodeURIComponent(raw) + "&token=" + encodeURIComponent(state.token);
+  }
+
+  function cacheChat(name) {
+    if (!name || !state.lastMessages.length) { return; }
+    state.chats[name] = { rev: state.rev, messages: state.lastMessages };
+    var keys = Object.keys(state.chats);
+    while (keys.length > MAX_CHAT_CACHE) {
+      delete state.chats[keys.shift()];
+    }
+  }
+
+  // ------------------------------------------------------------- 轮询
+  //
+  // 用 setTimeout 链式调度而不是 setInterval：慢请求不会堆积成雪崩，
+  // 而之前正是 setInterval + 每次重建 DOM 让手表一直忙于重绘。
+
+  function stopPolling() {
+    if (state.timer) { clearTimeout(state.timer); state.timer = null; }
+  }
+
+  function schedulePoll() {
+    stopPolling();
+    if (!state.current) { return; }
+    var delay = document.hidden ? POLL_IDLE_MS : POLL_ACTIVE_MS;
+    state.timer = setTimeout(pollOnce, delay);
+  }
+
+  function pollOnce() {
+    if (!state.current) { return; }
+    if (state.busy || state.inflight) { schedulePoll(); return; }
+    fetchMessages(false).then(schedulePoll, schedulePoll);
+  }
+
+  function fetchMessages(showErrors) {
+    var name = state.current;
+    if (!name) { return Promise.resolve(); }
+    state.inflight = true;
+    $("chatDot").className = "dot";
+    var query = "/api/messages?name=" + encodeURIComponent(name) + "&limit=30";
+    if (state.rev) { query += "&rev=" + encodeURIComponent(state.rev); }
+
+    return api(query).then(function (data) {
+      if (state.current !== name) { return; }
+      $("chatDot").className = "dot ok";
+      if (data.unchanged) { return; }
+      state.rev = data.rev || "";
+      applyMessages(data.messages || []);
+      cacheChat(name);
+    }).catch(function (err) {
+      if (state.current !== name) { return; }
+      $("chatDot").className = "dot bad";
+      if (showErrors) { toast(err.message, "error"); }
+    }).then(function () {
+      state.inflight = false;
+    });
+  }
+
+  // ------------------------------------------------------------- 聊天
+
+  function openChat(name) {
+    closeComposer();
+    state.current = name;
+    state.rev = "";
+    $("chatTitle").textContent = name;
+    $("composerName").textContent = name;
+    renderStickers();
+    show("chatView");
+
+    var cached = state.chats[name];
+    if (cached && cached.messages && cached.messages.length) {
+      // 内存缓存直接铺满，先看到内容再后台同步
+      clearMessages();
+      applyMessages(cached.messages, true);
+      state.rev = cached.rev || "";
+    } else {
+      showPlaceholder("正在打开会话…");
+    }
+
+    stopPolling();
+    fetchMessages(true).then(schedulePoll, schedulePoll);
+  }
+
+  function backToList() {
+    stopPolling();
+    closeComposer();
+    state.current = null;
+    renderFriends();
+    show("listView");
+  }
+
+  function refreshChat() {
+    if (!state.current) { return; }
+    state.rev = "";
+    fetchMessages(true).then(schedulePoll, schedulePoll);
+  }
+
+  function thumbUrl(id) {
+    return "/api/sticker_thumb?id=" + encodeURIComponent(id) +
+           "&token=" + encodeURIComponent(state.token);
+  }
+
+  // 表情格子 = 表情库（有图就显示图）+ 配置里的快捷表情（库里没有的，退化成文字格）。
+  // 去重顺序很重要：库里已经有「续火花」的图时，不该再冒出一个纯文字的「续火花」。
+  function stickerTiles() {
+    var tiles = [];
+    var seen = {};
+    (state.stickers || []).forEach(function (item) {
+      if (!item || !item.name || seen[item.name]) { return; }
+      seen[item.name] = true;
+      tiles.push({
+        name: item.name,
+        label: item.label || item.name,
+        url: item.has_thumb ? thumbUrl(item.id) : ""
+      });
+    });
+    (state.presets || []).forEach(function (name) {
+      if (!name || seen[name]) { return; }
+      seen[name] = true;
+      tiles.push({ name: name, label: name, url: "" });
+    });
+    return tiles;
+  }
+
+  function renderStickers() {
+    var grid = $("stickerGrid");
+    grid.innerHTML = "";
+    var tiles = stickerTiles();
+    if (!tiles.length) {
+      var empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "还没有表情。在电脑上跑一次 scripts/scan_stickers.py 扫抖音表情面板。";
+      grid.appendChild(empty);
+      return;
+    }
+    var fragment = document.createDocumentFragment();
+    tiles.forEach(function (tile) {
+      var btn = document.createElement("button");
+      btn.className = "sticker";
+      if (tile.url) {
+        var img = document.createElement("img");
+        img.alt = "";
+        img.loading = "lazy";
+        img.src = tile.url;
+        // 图挂了就退回纯文字格，别把空格子摆在那儿
+        img.onerror = function () {
+          btn.classList.remove("with-img");
+          img.remove();
+        };
+        btn.classList.add("with-img");
+        btn.appendChild(img);
+      }
+      var label = document.createElement("span");
+      label.textContent = tile.label;
+      btn.appendChild(label);
+      btn.onclick = function () { sendSticker(tile.name); };
+      fragment.appendChild(btn);
+    });
+    grid.appendChild(fragment);
+  }
+
+  // ------------------------------------------------------------- 发送面板
+  //
+  // 圆屏下沿的可视宽度随角度收缩，贴底横排输入框会被裁成一条窄缝，
+  // 所以改成圆心附近的居中卡片（内接正方形内侧，四角一定不会被裁）。
+
+  function openComposer() {
+    if (!state.current) { return; }
+    if (state.busy) { toast("正在发送上一条，请稍候"); return; }
+    $("composerName").textContent = state.current;
+    renderStickers();
+    $("composer").classList.remove("hidden");
+    var input = $("textInput");
+    try { input.focus(); } catch (e) { /* 部分浏览器禁止脚本聚焦，忽略 */ }
+  }
+
+  function closeComposer() {
+    $("composer").classList.add("hidden");
+    var input = $("textInput");
+    if (input) { input.blur(); }
+  }
+
+  function sendText() {
+    if (!state.current) { return; }
+    var input = $("textInput");
+    var text = (input.value || "").trim();
+    if (!text) { toast("先输入内容"); return; }
+    if (state.busy) { toast("正在发送上一条，请稍候"); return; }
+    input.value = "";
+    closeComposer();
+    deliver({ text: text });
+  }
+
+  function sendSticker(name) {
+    if (!state.current) { return; }
+    if (state.busy) { toast("正在发送上一条，请稍候"); return; }
+    closeComposer();
+    deliver({ sticker: name });
+  }
+
+  function deliver(payload) {
+    var name = state.current;
+    if (!name) { return; }
+    state.busy = true;
+    stopPolling();
+    $("sendBtn").disabled = true;
+    $("sendBtn").textContent = "发送中";
+    // 乐观回显：立刻把自己的消息贴在底部，不用等服务端往返
+    appendOptimistic(payload);
+    toast("发送中…");
+
+    var body = { name: name };
+    for (var key in payload) { if (payload.hasOwnProperty(key)) { body[key] = payload[key]; } }
+
+    api("/api/send", { method: "POST", body: body })
+      .then(function (data) {
+        dropOptimistic();
+        if (data && data.messages) {
+          // 服务端直接回传了最新列表，省掉一次 /api/messages 往返
+          state.rev = data.rev || "";
+          applyMessages(data.messages);
+          cacheChat(name);
+        } else {
+          state.rev = "";
+          fetchMessages(false);
+        }
+        toast("已发送", "ok");
+      })
+      .catch(function (err) {
+        dropOptimistic();
+        toast(err.message, "error");
+      })
+      .then(function () {
+        state.busy = false;
+        $("sendBtn").disabled = false;
+        $("sendBtn").textContent = "发送";
+        schedulePoll();
+      });
+  }
+
+  function onVisibilityChange() {
+    if (!state.current) { schedulePoll(); return; }
+    if (document.hidden) { schedulePoll(); return; }
+    // 抬腕点亮屏幕后立刻同步一次，不用等下一个轮询周期
+    if (state.busy || state.inflight) { schedulePoll(); return; }
+    fetchMessages(false).then(schedulePoll, schedulePoll);
+  }
+
+  // ------------------------------------------------------------- 手势
+  //
+  // 圆屏没有角落可以放返回键，所以沿用智能手表通用手势：右滑返回。
+
+  function bindGestures() {
+    var startX = 0, startY = 0, tracking = false;
+    var chat = $("chatView");
+    chat.addEventListener("touchstart", function (e) {
+      if (e.touches.length !== 1) { tracking = false; return; }
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      tracking = true;
+    }, { passive: true });
+    chat.addEventListener("touchend", function (e) {
+      if (!tracking) { return; }
+      tracking = false;
+      if ($("composer").classList.contains("hidden") === false) { return; }
+      var touch = (e.changedTouches && e.changedTouches[0]) || null;
+      if (!touch) { return; }
+      var dx = touch.clientX - startX;
+      var dy = touch.clientY - startY;
+      if (dx > 60 && Math.abs(dy) < 60) { backToList(); }
+    }, { passive: true });
+
+    // 发送卡片：下滑关闭
+    var sheet = $("composer");
+    sheet.addEventListener("touchstart", function (e) {
+      if (e.touches.length !== 1) { tracking = false; return; }
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      tracking = true;
+    }, { passive: true });
+    sheet.addEventListener("touchend", function (e) {
+      if (!tracking) { return; }
+      tracking = false;
+      var touch = (e.changedTouches && e.changedTouches[0]) || null;
+      if (!touch) { return; }
+      if (touch.clientY - startY > 70 && Math.abs(touch.clientX - startX) < 70) { closeComposer(); }
+    }, { passive: true });
+  }
+
+  window.saveToken = saveToken;
+  window.loadStatus = loadStatus;
+  window.openChat = openChat;
+  window.backToList = backToList;
+  window.refreshChat = refreshChat;
+  window.sendText = sendText;
+  window.sendSticker = sendSticker;
+  window.openComposer = openComposer;
+  window.closeComposer = closeComposer;
+  window.fitRadius = fitRadius;
+
+  var hint = $("frameUrl");
+  if (hint) { hint.textContent = location.origin + "/?token=…"; }
+  // 预览外壳里的诊断行：万一在手表上看到这段文字，截图就能看出是 UA 还是视口被改
+  var diag = $("frameDiag");
+  if (diag) {
+    diag.textContent = "诊断：视口 " + window.innerWidth + "×" + window.innerHeight +
+      " · 屏幕 " + (screen.width || "?") + "×" + (screen.height || "?") + " · UA " +
+      String(navigator.userAgent || "").slice(0, 100);
+  }
+  var fullLink = $("frameFull");
+  if (fullLink) {
+    // 令牌已存在 localStorage，走 ?full=1 不会丢登录态
+    fullLink.href = location.pathname + "?full=1";
+  }
+
+  state.token = readToken();
+  if (!state.token) { needsToken(); return; }
+  // 有本地缓存就先渲染好友列表，页面「打开即见」，再后台校验连接
+  restoreCachedList();
+  if (state.friends.length) {
+    renderFriends();
+    show("listView");
+  }
+  bindGestures();
+  loadStatus(false);
+  document.addEventListener("visibilitychange", onVisibilityChange);
+})();
+</script>
+</body>
+</html>

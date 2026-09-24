@@ -1,0 +1,17 @@
+# 行尾一律 LF。
+#
+# 服务端跑在 Windows 上，本机 core.autocrlf=true 会把文本文件在 checkout 时
+# 变成 CRLF。这批 .py / .sh / .bat 目前都是 LF，保持原样最省事
+# （LF 的 .bat 在 Windows 上照样能跑，改了反而会让每次 diff 都显示整文件变更）。
+* text=auto eol=lf
+
+# 例外：批处理必须是 CRLF。
+# cmd.exe 对 LF-only 的 .bat 在 goto/标签/多行块上行为不可靠，这不是可以赌的地方。
+*.bat text eol=crlf
+
+# 二进制：明确声明，避免任何行尾或编码转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.zip binary
+*.p12 binary

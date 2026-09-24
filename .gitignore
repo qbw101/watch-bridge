@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------- 账号与密钥
+# storage-state.json 是抖音的登录 cookie（Playwright storageState 格式）。
+# 拿到它等于拿到这个抖音号 —— 无论仓库公开与否都不该进版本库。
+storage-state.json
+storage-state.json.*
+*.cookies.json
+
+# 运行配置里带着访问令牌，同样不上传。模板见 server_config.example.json。
+server_config.json
+server_config.json.bak
+server_config.json.bad
+
+# 手表端好友名单是用户的真实联系人，模板见 config.example.json。
+config.json
+config.json.bak
+
+# 表情库是扫描出来的运行数据（含用户自建表情的显示名与面板序号），
+# 跑 scripts/scan_stickers.py 可以重新生成。
+watch_stickers.json
+watch_stickers.json.bak
+
+# 开发笔记：里面记着本机内网地址、令牌和历史调试结论。
+.workbuddy/
+
+# ---------------------------------------------------------------- 运行产物
+# 日志、锁、表情缩略图、抓取中间结果。单个大到几十 MB，且含内网地址。
+artifacts/
+
+# 显式指向本机解释器路径、可用 .env.example 代替
+.env
+
+# ---------------------------------------------------------------- Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# ---------------------------------------------------------------- IDE
+/.idea/
+/.vscode/
+*.iml
+
+# ---------------------------------------------------------------- 系统
+.DS_Store
+Thumbs.db
+desktop.ini

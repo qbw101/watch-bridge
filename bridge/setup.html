@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>抖音手表助手 · 服务端配置</title>
+<style>
+  :root {
+    --w-bg: #000000;
+    --w-card: #1c1c1e;
+    --w-card2: #2c2c2e;
+    --w-line: rgba(255, 255, 255, 0.12);
+    --w-t1: #ffffff;
+    --w-t2: rgba(255, 255, 255, 0.62);
+    --w-t3: rgba(255, 255, 255, 0.38);
+    --w-blue: #0a84ff;
+    --w-red: #fe2c55;
+    --w-green: #30d158;
+    --w-yellow: #ffd60a;
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--w-bg);
+    color: var(--w-t1);
+    font: 15px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    padding: 32px 20px 120px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+  .mono { font-family: "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace; }
+
+  /* ---------------------------------------------------------------- 顶栏 */
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+  header h1 { font-size: 21px; font-weight: 600; margin: 0; letter-spacing: .2px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--w-card2); border-radius: 999px;
+    padding: 5px 13px; font-size: 13px; color: var(--w-t2);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--w-t3); }
+  .dot.on { background: var(--w-green); box-shadow: 0 0 10px rgba(48, 209, 88, .6); }
+  .dot.warn { background: var(--w-yellow); }
+  .dot.err { background: var(--w-red); }
+  .sub { color: var(--w-t3); font-size: 13px; margin: 0 0 22px; }
+
+  /* ---------------------------------------------------------------- 卡片 */
+  .card {
+    background: var(--w-card);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+    margin-bottom: 16px;
+  }
+  .card h2 {
+    font-size: 15px; font-weight: 600; margin: 0 0 4px;
+    display: flex; align-items: center; gap: 9px;
+  }
+  .card h2 .idx {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--w-blue); color: #fff; font-size: 12px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+  }
+  .card .hint { color: var(--w-t3); font-size: 13px; margin: 0 0 16px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
+  @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+
+  /* ---------------------------------------------------------------- 表单 */
+  label.field { display: block; }
+  label.field > .lb { display: block; font-size: 13px; color: var(--w-t2); margin-bottom: 6px; }
+  input, select {
+    width: 100%; padding: 10px 12px; font: inherit; font-size: 14px;
+    background: var(--w-card2); color: var(--w-t1);
+    border: 1px solid transparent; border-radius: 10px; outline: none;
+  }
+  input:focus, select:focus { border-color: var(--w-blue); background: #33333a; }
+  input.mono { letter-spacing: .5px; }
+  .inline { display: flex; gap: 8px; align-items: stretch; }
+  .inline input { flex: 1; min-width: 0; }
+  .note { color: var(--w-t3); font-size: 12px; margin-top: 6px; }
+  .radio-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .radio-row label {
+    background: var(--w-card2); border-radius: 10px; padding: 9px 13px;
+    font-size: 13.5px; color: var(--w-t2); cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .radio-row input { width: auto; padding: 0; margin: 0; accent-color: var(--w-blue); }
+  .radio-row label:has(input:checked) { background: rgba(10, 132, 255, .18); color: var(--w-t1); }
+
+  /* ---------------------------------------------------------------- 按钮 */
+  button {
+    font: inherit; font-size: 14px; cursor: pointer;
+    background: var(--w-card2); color: var(--w-t1);
+    border: 0; border-radius: 10px; padding: 10px 16px;
+    transition: filter .12s ease;
+  }
+  button:hover { filter: brightness(1.25); }
+  button:active { transform: scale(.985); }
+  button:disabled { opacity: .45; cursor: default; filter: none; }
+  button.primary { background: var(--w-blue); color: #fff; font-weight: 600; }
+  button.ghost { background: transparent; border: 1px solid var(--w-line); }
+  button.sm { padding: 8px 12px; font-size: 13px; }
+  .role-note { font-size: 12.5px; color: var(--w-t3); margin: 10px 0 0; }
+
+  /* ------------------------------------------------------------ 要填的地址 */
+  .fillbox { background: var(--w-card2); border-radius: 14px; padding: 16px 18px; margin-top: 14px; }
+  .fillrow { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .fillrow .k { width: 62px; color: var(--w-t3); font-size: 13px; flex: none; }
+  .fillrow .v {
+    font-size: 22px; font-weight: 700; letter-spacing: .6px;
+    color: var(--w-blue); word-break: break-all; flex: 1; min-width: 0;
+  }
+  .fillrow .v.tok { font-size: 19px; color: var(--w-t1); }
+  .fillrow + .fillrow { margin-top: 10px; }
+  .iplist { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .ipchip {
+    background: var(--w-card); border: 1px solid var(--w-line); border-radius: 999px;
+    padding: 6px 13px; font-size: 13px; color: var(--w-t2); cursor: pointer;
+  }
+  .ipchip.sel { border-color: var(--w-blue); color: var(--w-t1); background: rgba(10, 132, 255, .14); }
+  .ipchip small { color: var(--w-t3); margin-left: 6px; }
+
+  /* --------------------------------------------- 手表端好友（config.json） */
+  .sep { color: var(--w-t3); align-self: center; flex: none; font-size: 13px; }
+  .rowhead {
+    display: flex; align-items: center; gap: 12px; margin: 18px 0 8px;
+  }
+  .rowhead .lb { font-size: 13px; color: var(--w-t2); }
+  .rowhead .grow { flex: 1; min-width: 0; }
+  .friendlist {
+    background: var(--w-card2); border-radius: 12px;
+    max-height: 420px; overflow: auto; margin-top: 12px;
+  }
+  .friendrow {
+    display: flex; align-items: center; gap: 11px;
+    padding: 10px 14px; cursor: pointer;
+  }
+  .friendrow + .friendrow { border-top: 1px solid var(--w-line); }
+  .friendrow:hover { background: rgba(255, 255, 255, .045); }
+  .friendrow input[type=checkbox] {
+    width: 16px; height: 16px; padding: 0; margin: 0; flex: none;
+    accent-color: var(--w-blue); cursor: pointer;
+  }
+  .friendrow .fn { font-size: 14px; }
+  .friendrow .tag {
+    flex: none; font-size: 11px; color: var(--w-t3);
+    border: 1px solid var(--w-line); border-radius: 999px; padding: 1px 8px;
+  }
+  .friendrow .fp {
+    margin-left: auto; font-size: 12px; color: var(--w-t3);
+    max-width: 44%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* 没勾的、以及这次没读到的，都往后退一档，眼睛先落在「已启用」那几个上 */
+  .friendrow.off .fn { color: var(--w-t2); }
+  .friendrow.missing .fn { color: var(--w-t3); }
+  .friendlist .empty { padding: 18px 14px; color: var(--w-t3); font-size: 13px; }
+  .switches { display: flex; flex-wrap: wrap; gap: 10px 26px; margin-top: 16px; }
+  .switches label { display: inline-flex; align-items: center; gap: 9px; font-size: 13.5px; color: var(--w-t2); }
+  .switches input { width: auto; padding: 0; margin: 0; accent-color: var(--w-blue); }
+  .greynote { color: var(--w-t3); font-size: 12.5px; margin: 14px 0 0; }
+  .badge.file { background: rgba(10, 132, 255, .16); color: #9dcaff; }
+  .badge.file.bad { background: rgba(254, 44, 85, .16); color: #ff8fa6; }
+
+  /* -------------------------------------------------------------- 抖音账号 */
+  .acct { display: flex; align-items: center; gap: 14px; }
+  .avatar {
+    position: relative; flex: none; width: 56px; height: 56px; border-radius: 50%;
+    background: var(--w-card2); color: var(--w-t2); font-size: 22px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  .avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .acctinfo { flex: 1; min-width: 0; }
+  .acctname { font-size: 20px; font-weight: 700; letter-spacing: .2px; }
+  .acctmeta { color: var(--w-t3); font-size: 12.5px; margin-top: 3px; word-break: break-all; }
+  .acctact { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 18px 0 14px; }
+  button.ghost.danger { border-color: rgba(254, 44, 85, .45); color: #ff8fa6; }
+  button.ghost.danger:hover { background: rgba(254, 44, 85, .12); }
+  #loginStrip { margin: 0; }
+
+  /* ---------------------------------------------------------------- 提示条 */
+  .strip {    border-radius: 12px; padding: 12px 16px; font-size: 13.5px;
+    margin-bottom: 16px; display: none; white-space: pre-line;
+  }
+  .strip.show { display: block; }
+  .strip.info { background: rgba(10, 132, 255, .14); color: #9dcaff; }
+  .strip.warn { background: rgba(255, 214, 10, .13); color: #ffe27a; }
+  .strip.err { background: rgba(254, 44, 85, .14); color: #ff8fa6; }
+  .strip.ok { background: rgba(48, 209, 88, .13); color: #8ceaa8; }
+
+  /* ---------------------------------------------------------------- 状态面板 */
+  dl.status { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 9px 18px; font-size: 13.5px; }
+  dl.status dt { color: var(--w-t3); white-space: nowrap; }
+  dl.status dd { margin: 0; color: var(--w-t2); word-break: break-all; }
+  dl.status dd b { color: var(--w-t1); font-weight: 600; }
+
+  /* ---------------------------------------------------------------- 底部栏 */
+  footer {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, .82); backdrop-filter: blur(18px);
+    border-top: 1px solid var(--w-line); padding: 14px 20px;
+  }
+  .footinner { max-width: 940px; margin: 0 auto; display: flex; align-items: center; gap: 14px; }
+  .footinner .grow { flex: 1; min-width: 0; color: var(--w-t3); font-size: 13px; }
+  .dirty { color: var(--w-yellow); }
+  .privacy { color: var(--w-t3); font-size: 12.5px; margin-top: 4px; }
+  code { background: var(--w-card2); padding: 2px 6px; border-radius: 6px; font-size: 12.5px; }
+  a { color: var(--w-blue); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>抖音手表助手 · 服务端配置</h1>
+    <span class="badge"><span class="dot" id="svcDot"></span><span id="svcText">连接中…</span></span>
+  </header>
+  <p class="sub">本页仅监听本机回环地址（127.0.0.1），外部网络无法访问。修改后点击右下角「保存全部」提交；端口、令牌、登录态等项需重启服务方可生效。第 2 块为抖音账号（桥接服务通过该账号收发消息），第 3 块指定手表端显示哪些会话（可直接从抖音读取后勾选），第 4 块起为服务自身的设置。</p>
+
+  <div class="strip info" id="welcome"></div>
+  <div class="strip warn" id="restartStrip"></div>
+  <div class="strip warn" id="warnStrip"></div>
+  <div class="strip err" id="errStrip"></div>
+  <div class="strip ok" id="okStrip"></div>
+
+  <!-- ============================================================ 要填的 -->
+  <section class="card">
+    <h2><span class="idx">1</span>手表端需要填写的两项</h2>
+    <p class="hint">在手表上打开应用，进入「设置」，照录以下两行内容。手表须与本机处于同一 Wi-Fi 网络。</p>
+    <div class="fillbox">
+      <div class="fillrow">
+        <span class="k">电脑地址</span>
+        <span class="v mono" id="addrOut">—</span>
+        <button class="sm ghost" data-copy="addrOut">复制</button>
+      </div>
+      <div class="fillrow">
+        <span class="k">访问令牌</span>
+        <span class="v mono tok" id="tokenOut">—</span>
+        <button class="sm ghost" data-copy="tokenOut">复制</button>
+      </div>
+    </div>
+    <div class="iplist" id="ipList"></div>
+    <p class="role-note">
+      8787 是裸 TCP 服务，并非网站，用浏览器访问该地址只会显示乱码，属正常现象。
+      如需在蜂窝网络下连接，请使用穿透服务商的 <b>TCP 隧道</b>；若本机具备公网 IPv6，也可在手表端直接填写
+      <span class="mono" id="v6Out">%s</span> 形式的地址。
+    </p>
+  </section>
+
+  <!-- ============================================================ 抖音账号 -->
+  <section class="card" id="accountCard" hidden>
+    <h2>
+      <span class="idx">2</span>抖音账号
+      <span class="badge file" id="acctBadge">storage-state.json</span>
+    </h2>
+    <p class="hint">
+      桥接服务使用下列账号收发消息。该账号未登录时，手表端既无法读取消息，也无法发送。
+      凭证写在 <span class="mono" id="acctPathOut">storage-state.json</span>，点击「扫码登录」后自动写入。
+    </p>
+
+    <div class="acct">
+      <div class="avatar"><span id="acctInitial">?</span><img id="acctAvatar" alt="" hidden></div>
+      <div class="acctinfo">
+        <div class="acctname" id="acctName">—</div>
+        <div class="acctmeta" id="acctMeta">—</div>
+      </div>
+    </div>
+
+    <div class="acctact">
+      <button class="primary" id="btnLogin">扫码登录</button>
+      <button class="ghost" id="btnCancel" hidden>取消本次扫码</button>
+      <button class="ghost danger" id="btnLogout">退出登录</button>
+    </div>
+
+    <div class="strip" id="loginStrip"></div>
+  </section>
+
+  <!-- ======================================================== 手表端好友 -->
+  <section class="card" id="friendCard" hidden>
+    <h2>
+      <span class="idx">3</span>手表上显示哪些好友
+      <span class="badge file" id="friendBadge">config.json</span>
+    </h2>
+    <p class="hint">
+      手表端打开时列出的会话，即本处勾选的会话。名单写入项目根目录
+      <span class="mono" id="friendPathOut">config.json</span> 的 <code>friends</code> 键。
+      保存前会先做校验，校验不通过则不会写入任何内容；每次保存前会将上一版本留存为
+      <code>config.json.bak</code>。
+    </p>
+    <div class="strip err" id="friendErr"></div>
+    <div class="strip warn" id="friendWarn"></div>
+
+    <div id="friendBody">
+      <div class="rowhead">
+        <span class="lb grow">已启用 <b id="friendCount">0</b> 位</span>
+        <button class="sm" id="btnScan" type="button">从抖音读取好友</button>
+        <button class="sm ghost" id="btnScanCancel" type="button" hidden>取消</button>
+      </div>
+      <p class="greynote" id="scanNote"></p>
+      <div class="friendlist" id="friendList"></div>
+      <p class="greynote" id="friendHint"></p>
+    </div>
+  </section>
+
+  <!-- ============================================================ 连接 -->
+  <section class="card">
+    <h2><span class="idx">4</span>连接设置</h2>
+    <p class="hint">默认值适用于绝大多数场景，未出现问题时无需修改。</p>
+    <div class="cols">
+      <label class="field">
+        <span class="lb">监听端口</span>
+        <input type="number" id="f-port" min="1" max="65535" step="1">
+        <span class="note">手表端填写的地址需使用同一端口。</span>
+      </label>
+      <label class="field">
+        <span class="lb">监听地址</span>
+        <select id="f-host">
+          <option value="0.0.0.0">0.0.0.0 —— 所有网卡（推荐）</option>
+          <option value="::">:: —— 同时接受 IPv6</option>
+        </select>
+        <span class="note">选择「同时接受 IPv6」后，手表在蜂窝网络下有可能直连本机。</span>
+      </label>
+      <label class="field">
+        <span class="lb">访问令牌</span>
+        <span class="inline">
+          <input type="text" id="f-token" class="mono" spellcheck="false" autocomplete="off">
+          <button class="sm ghost" id="btnToken">重新生成</button>
+        </span>
+        <span class="note">更换令牌后须同步更新手表端配置，否则无法连接。</span>
+      </label>
+      <label class="field">
+        <span class="lb">链路加密</span>
+        <select id="f-crypto">
+          <option value="gcm">强制加密 —— X25519 + AES-256-GCM（推荐）</option>
+          <option value="auto">跟随客户端（仅用于排障，可能降级为明文）</option>
+          <option value="plain">明文（仅当确认问题由加密引起时使用）</option>
+        </select>
+        <span class="note">手表端应用使用同一套二进制帧协议，加密方式由双方自动协商。</span>
+      </label>
+    </div>
+  </section>
+
+  <!-- ============================================================ 图传 -->
+  <section class="card">
+    <h2><span class="idx">5</span>图片下发</h2>
+    <p class="hint">手表屏幕尺寸有限，降低边长可显著缩短传输时间。修改后需重启服务生效。</p>
+    <div class="cols">
+      <label class="field">
+        <span class="lb">表情缩略图最长边（像素）</span>
+        <input type="number" id="f-sticker_px" min="16" max="256" step="4">
+        <span class="note">默认 72。表情格里的小图，调大仅提升清晰度，对速度影响很小。</span>
+      </label>
+      <label class="field">
+        <span class="lb">聊天图片最长边（像素）</span>
+        <input type="number" id="f-media_px" min="16" max="512" step="8">
+        <span class="note">默认 128。聊天图片需实时抓取并压缩，调大后耗时明显增加。</span>
+      </label>
+    </div>
+  </section>
+
+  <!-- ============================================================ 启动 -->
+  <section class="card">
+    <h2><span class="idx">6</span>启动行为</h2>
+    <p class="hint">服务运行期间本页持续可用（地址不变），可随时重新打开修改配置。</p>
+    <div class="radio-row" id="openRow">
+      <label><input type="radio" name="open_page" value="first">仅在尚未完成配置时自动打开（推荐）</label>
+      <label><input type="radio" name="open_page" value="always">每次启动时打开</label>
+      <label><input type="radio" name="open_page" value="never">从不自动打开</label>
+    </div>
+    <p class="role-note">
+      选择「从不自动打开」后如需再次进入：启动时附加 <code>--setup</code> 参数，或在浏览器中直接访问上方本机地址
+      <span class="mono" id="urlOut">—</span>。
+    </p>
+  </section>
+
+  <!-- ============================================================ 状态 -->
+  <section class="card">
+    <h2><span class="idx">7</span>当前状态</h2>
+    <p class="hint">只读信息，无法在本页修改。</p>
+    <dl class="status" id="statusList"></dl>
+    <p class="privacy">
+      注意：本页以明文显示访问令牌，请勿截图外传。令牌等同于「谁可以给我的手表发送消息」的凭证；
+      确需分享截图时，请先点击「重新生成」再截图。
+    </p>
+  </section>
+</div>
+
+<footer>
+  <div class="footinner">
+    <span class="grow" id="footHint">就绪</span>
+    <button class="ghost" id="btnReload">重新读取</button>
+    <button class="primary" id="btnSave">保存全部</button>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var FIELDS = ['host', 'port', 'token', 'crypto', 'sticker_px', 'media_px', 'open_page'];
+  var state = null;          // 服务端最近一次返回的状态
+  var dirty = false;         // 本地改了还没保存
+  var selectedIp = null;     // 地址行里当前选中的那张网卡
+  var busy = false;
+  var launched = false;      // 已经提交过「保存并启动服务」
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  // ---------------------------------------------------------------- 提示条
+  function strip(id, text, kind) {
+    var el = $(id);
+    if (!text) { el.classList.remove('show'); el.textContent = ''; return; }
+    el.textContent = text;
+    if (kind) { el.className = 'strip ' + kind + ' show'; }
+    else { el.classList.add('show'); }
+  }
+  function clearStrips() {
+    ['welcome', 'restartStrip', 'warnStrip', 'errStrip', 'okStrip'].forEach(function (id) {
+      var el = $(id); el.classList.remove('show'); el.textContent = '';
+    });
+  }
+  function toast(text, kind) {
+    clearStrips();
+    strip(kind === 'error' ? 'errStrip' : 'okStrip', text);
+    if (kind === 'error') { return; }
+    setTimeout(function () {
+      var el = $('okStrip');
+      if (el.textContent === text) { el.classList.remove('show'); el.textContent = ''; }
+    }, 4000);
+  }
+
+  // ---------------------------------------------------------------- 请求
+  function request(path, options) {
+    var opts = options || {};
+    if (opts.body !== undefined) {
+      opts.headers = { 'Content-Type': 'application/json', 'X-Watch-Setup': '1' };
+      opts.body = JSON.stringify(opts.body);
+    }
+    return fetch(path, opts).then(function (res) {
+      return res.json().catch(function () { return { ok: false, error: 'HTTP ' + res.status }; });
+    }).then(function (data) {
+      if (!data || data.ok === false) {
+        throw new Error((data && data.error) || '请求失败');
+      }
+      return data;
+    });
+  }
+
+  // ---------------------------------------------------------------- 渲染
+  function formValues() {
+    var values = {};
+    values.host = $('f-host').value;
+    values.port = $('f-port').value;
+    values.token = $('f-token').value;
+    values.crypto = $('f-crypto').value;
+    values.sticker_px = $('f-sticker_px').value;
+    values.media_px = $('f-media_px').value;
+    var picked = document.querySelector('input[name=open_page]:checked');
+    values.open_page = picked ? picked.value : 'first';
+    return values;
+  }
+
+  function fillForm(cfg) {
+    $('f-port').value = cfg.port;
+    $('f-host').value = cfg.host;
+    if ($('f-host').value !== cfg.host) {
+      // 手写的自定义监听地址：加一个选项进去，别让 select 悄悄改成第一项
+      var opt = document.createElement('option');
+      opt.value = cfg.host; opt.textContent = cfg.host + '（自定义）';
+      $('f-host').appendChild(opt);
+      $('f-host').value = cfg.host;
+    }
+    $('f-token').value = cfg.token;
+    $('f-crypto').value = cfg.crypto;
+    $('f-sticker_px').value = cfg.sticker_px;
+    $('f-media_px').value = cfg.media_px;
+    var picked = document.querySelector('input[name=open_page][value="' + cfg.open_page + '"]');
+    if (picked) { picked.checked = true; }
+    markClean();
+    renderAddress();
+    renderOut();
+  }
+
+  function markDirty() {
+    dirty = true;
+    $('footHint').innerHTML = '<span class="dirty">有改动尚未保存</span>';
+  }
+  function markClean() {
+    dirty = false;
+    friendDirty = false;
+    $('footHint').textContent = '就绪';
+    $('btnSave').disabled = false;
+  }
+
+  function renderAddress() {
+    var port = ($('f-port').value || '').trim() || '8787';
+    var ip = selectedIp;
+    $('addrOut').textContent = (ip ? ip : '<本机局域网 IP>') + ':' + port;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  // 路径可能很长，只保留最后两段，悬停看全
+  function shorten(p) {
+    if (!p) { return '—'; }
+    var parts = String(p).split(/[\\/]/).filter(Boolean);
+    return parts.length > 2 ? '…/' + parts.slice(-2).join('/') : p;
+  }
+
+  function renderOut() {
+    var svc = (state && state.service) || {};
+    var dot = $('svcDot'), text = $('svcText');
+    if (svc.startup_error) {
+      dot.className = 'dot err'; text.textContent = '抖音会话启动失败';
+    } else if (svc.backend_ready) {
+      dot.className = 'dot on';
+      text.textContent = svc.sessions > 0 ? ('服务运行中 · 手表已连接 ' + svc.sessions) : '服务运行中 · 等待手表连接';
+    } else if (state && state.first_run) {
+      dot.className = 'dot warn'; text.textContent = '等待确认配置';
+    } else {
+      dot.className = 'dot warn'; text.textContent = '正在启动抖音会话…';
+    }
+
+    var rows = [
+      ['服务监听', (state && state.runtime ? state.runtime.host + ':' + state.runtime.port : '尚未开始监听')
+        + (state && state.runtime ? '' : '（首次启动将在确认配置后开始）')],
+      ['在线手表', svc.sessions ? svc.sessions + ' 台' : '0 台'],
+      ['抖音账号', accountSummary(state && state.account)],
+      ['手表端好友', friendsRow(state && state.friends)],
+      ['运行日志', '<span title="' + escapeHtml(svc.log_path || '') + '">' + escapeHtml(shorten(svc.log_path)) + '</span>'],
+    ].concat(pathRows());
+    $('statusList').innerHTML = rows.map(function (r) {
+      return '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>';
+    }).join('');
+
+    if (svc.startup_error) {
+      strip('errStrip', '抖音会话未能启动：' + svc.startup_error
+        + '\n常见原因：登录凭证失效（执行 scripts\\login_auto.py 重新扫码），或另一任务持有锁（执行 scripts\\clear_stale_lock.py）。');
+    }
+  }
+
+  function render() {
+    if (!state) { return; }
+    var runtime = state.runtime;
+    var awaitingFirstRun = state.first_run && state.awaiting_launch;
+
+    if (launched && state.first_run) {
+      // 已经点了「保存并启动服务」，等主线程把抖音会话拉起来 —— 这时候按钮别
+      // 变回「保存」，否则用户会以为没点上。
+      $('btnSave').textContent = '服务正在启动…';
+      $('btnSave').disabled = true;
+    } else if (awaitingFirstRun) {
+      $('btnSave').textContent = '保存并启动服务';
+      $('btnSave').disabled = false;
+      strip('welcome', '这是首次启动。请先在第 2 块确认抖音账号是否正确，'
+        + '然后点击右下角「保存并启动服务」。服务将在数秒内启动，并将弹出一个抖音浏览器窗口，请保持其打开。'
+        + '启动完成后回到第 3 块点击「从抖音读取好友」，即可勾选要在手表上显示的会话。');
+    } else {
+      $('btnSave').textContent = '保存全部';
+      $('btnSave').disabled = false;
+      if (!state.first_run) { strip('welcome', ''); }
+    }
+
+    // 未生效的改动
+    if (state.restart && state.restart.length) {
+      strip('restartStrip', '以下改动需重启服务方可生效：' + state.restart.join('、')
+        + '。关闭服务窗口并重新运行 run_watch_server.bat 即可，本页的值已保存。');
+    } else {
+      strip('restartStrip', '');
+    }
+
+    // 地址与令牌大字
+    $('tokenOut').textContent = (state.config.token || '（空）');
+    $('urlOut').textContent = state.url || '—';
+    $('v6Out').textContent = (state.ipv6 && state.ipv6.length) ? '[' + state.ipv6[0] + ']:' + state.config.port : '（本机无公网 IPv6）';
+    renderOut();
+  }
+
+  function renderIps() {
+    if (!state) { return; }
+    var lan = state.lan || [];
+    if (!selectedIp && lan.length) { selectedIp = lan[0]; }
+    // 第一张是「走默认路由」的那张网卡 —— 绝大多数情况就该用它，标成推荐
+    var chips = lan.map(function (ip, i) {
+      return '<span class="ipchip' + (ip === selectedIp ? ' sel' : '') + '" data-ip="' + escapeHtml(ip) + '">'
+        + escapeHtml(ip) + '<small>' + (i === 0 ? '推荐' : '其他网卡') + '</small></span>';
+    });
+    (state.ipv6 || []).forEach(function (ip) {
+      chips.push('<span class="ipchip' + (ip === selectedIp ? ' sel' : '') + '" data-ip="[' + escapeHtml(ip) + ']">'
+        + escapeHtml(ip) + '<small>公网 IPv6</small></span>');
+    });
+    if (!chips.length) { chips.push('<span class="ipchip">未检测到局域网地址，请检查网线或 Wi-Fi</span>'); }
+    $('ipList').innerHTML = chips.join('');
+    renderAddress();
+  }
+
+  // ================================================================== 抖音账号
+  // 这一块全是只读 + 三个动作（登录 / 取消 / 退出）。凭证文件的内容不在这里编辑 ——
+  // 它只能由扫码产生，手改等于伪造一个坏 cookie。
+  var acctNotice = null;     // 刚做完的动作留下的提示（有它就先显示它，几秒后让位给自动状态）
+  var acctBusy = false;
+
+  function showAcctNotice(kind, text, ms) {
+    acctNotice = { kind: kind, text: text, until: Date.now() + (ms || 6000) };
+  }
+
+  function accountSummary(acct) {
+    if (!acct) { return '—'; }
+    if (acct.error) { return '<b>凭证读取失败</b> —— 见第 2 块'; }
+    if (!acct.exists) { return '<b>未登录</b> —— 请在第 2 块点击「扫码登录」'; }
+    var who = acct.nickname ? '<b>' + escapeHtml(acct.nickname) + '</b>' : '凭证已存在（未读到账号信息）';
+    return who + (acct.login_at ? '（登录于 ' + escapeHtml(acct.login_at) + '）' : '');
+  }
+
+  function accountStatusText(acct) {
+    var svc = (state && state.service) || {};
+    var err = svc.startup_error || '';
+    if (err && /登录|扫码|认证|auth/i.test(err)) {
+      return { kind: 'err', text: '抖音返回该凭证已失效（服务启动时的原文：' + err
+        + '）。请点击「扫码登录」重新扫码，登录完成后重启服务。' };
+    }
+    if (acct.error) { return { kind: 'err', text: acct.error }; }
+    if (!acct.exists) {
+      return { kind: 'warn', text: '尚未登录。点击「扫码登录」将打开一个抖音浏览器窗口，'
+        + '使用手机抖音 App 扫码即可。扫码完成后凭证将自动写入上述文件，重启服务后生效。' };
+    }
+    return null;
+  }
+
+  function fillAccount(info) {
+    var card = $('accountCard');
+    if (!info) { card.hidden = true; return; }
+    card.hidden = false;
+
+    $('acctPathOut').textContent = shorten(info.path);
+    $('acctPathOut').title = info.path || '';
+    var badge = $('acctBadge');
+    if (info.error) { badge.textContent = '读取失败'; badge.className = 'badge file bad'; }
+    else if (!info.exists) { badge.textContent = '未登录'; badge.className = 'badge file bad'; }
+    else { badge.textContent = '已登录'; badge.className = 'badge file'; }
+
+    $('acctName').textContent = info.nickname || (info.exists ? '（未读到昵称）' : '尚未登录');
+    $('acctInitial').textContent = (info.nickname || '?').slice(0, 1);
+    var img = $('acctAvatar');
+    img.onload = function () { img.hidden = false; };
+    img.onerror = function () { img.hidden = true; };   // 头像挂了就露出首字母
+    if (info.avatar) {
+      if (img.getAttribute('src') !== info.avatar) { img.src = info.avatar; }
+      img.hidden = false;
+    } else if (img.getAttribute('src')) {
+      img.removeAttribute('src');
+      img.hidden = true;
+    } else {
+      img.hidden = true;
+    }
+
+    var meta = [];
+    if (info.exists) {
+      if (info.login_at) { meta.push('登录于 ' + info.login_at); }
+      meta.push('凭证更新于 ' + (info.mtime || '—'));
+      if (info.uid_short) { meta.push('uid ' + info.uid_short); }
+    }
+    $('acctMeta').textContent = meta.length ? meta.join('　·　') : (info.note || '无任何登录凭证');
+
+    var login = info.login || { state: 'idle' };
+    if (acctNotice && Date.now() < acctNotice.until) {
+      strip('loginStrip', acctNotice.text, acctNotice.kind);
+    } else {
+      acctNotice = null;
+      if (login.state === 'waiting') {
+        var tail = (login.output && login.output.length)
+          ? ('\n' + login.output.slice(-2).join('\n')) : '';
+        strip('loginStrip', '浏览器窗口已打开，请使用手机抖音 App 扫码登录（剩余 '
+          + login.seconds_left + ' 秒）。扫码完成后本页将自动更新为「已登录」。' + tail, 'info');
+      } else if (login.state === 'done') {
+        strip('loginStrip', (login.message || '登录成功。')
+          + '\n重启服务（关闭服务窗口并重新运行 run_watch_server.bat）后，将使用该账号收发消息。', 'ok');
+      } else if (login.state === 'failed') {
+        strip('loginStrip', login.message || '登录失败。', 'err');
+      } else if (login.state === 'timeout' || login.state === 'cancelled') {
+        strip('loginStrip', login.message || '', 'warn');
+      } else {
+        var status = accountStatusText(info);
+        strip('loginStrip', status ? status.text : '', status ? status.kind : '');
+      }
+    }
+    syncAcctButtons();
+  }
+
+  function syncAcctButtons() {
+    var acct = (state && state.account) || {};
+    var waiting = ((acct.login || {}).state === 'waiting');
+    var btn = $('btnLogin');
+    btn.disabled = acctBusy || waiting;
+    btn.textContent = waiting ? '等待扫码…' : (acct.exists ? '重新扫码登录' : '扫码登录');
+    btn.dataset.soft = acct.exists ? '1' : '';
+    $('btnLogout').disabled = acctBusy || waiting || !acct.exists;
+    $('btnCancel').hidden = !waiting;
+  }
+
+  function accountAction(path, failLabel, onDone) {
+    if (acctBusy) { return; }
+    acctBusy = true;
+    // 上一次动作留下的提示现在就作废 —— 否则「取消本次扫码」之后，用户看到的
+    // 还是上一次点的「浏览器窗口已打开」，会以为取消没生效。
+    acctNotice = null;
+    syncAcctButtons();
+    return request(path, { method: 'POST', body: {} }).then(function (data) {
+      // 必须写回全局 state：三个按钮的文案与禁用态都从 state.account 读，
+      // 只把返回值画进卡片的话，按钮要等下一轮轮询（最多 2 秒）才对得上。
+      if (data.account) { state = Object.assign({}, state, { account: data.account }); }
+      if (onDone) { onDone(data); }
+      fillAccount(data.account);
+    }).catch(function (err) {
+      strip('errStrip', failLabel + '：' + err.message);
+    }).then(function () {
+      acctBusy = false;
+      syncAcctButtons();
+    });
+  }
+
+  $('btnLogin').addEventListener('click', function () {
+    if (this.dataset.soft === '1'
+        && !window.confirm('该账号当前仍可正常使用。重新扫码将覆盖现有登录凭证（旧凭证立即失效）。是否继续？')) {
+      return;
+    }
+    // 不在这里铺提示条：等待态那几条消息是服务端每秒现算的（还剩多少秒、扫完变成
+    // 什么），盖上去反而把实时的信息压掉了。
+    accountAction('/api/account/login', '发起扫码登录失败');
+  });
+
+  $('btnCancel').addEventListener('click', function () {
+    accountAction('/api/account/cancel', '取消扫码失败');
+  });
+
+  var logoutArmed = false;
+  $('btnLogout').addEventListener('click', function () {
+    if (acctBusy) { return; }
+    if (!logoutArmed) {
+      // 删凭证是不可逆的，所以做成两下确认（和手表上删快捷短语一个路子）
+      logoutArmed = true;
+      this.textContent = '再次点击以确认删除';
+      setTimeout(function () {
+        if (logoutArmed) { logoutArmed = false; $('btnLogout').textContent = '退出登录'; }
+      }, 5000);
+      return;
+    }
+    logoutArmed = false;
+    $('btnLogout').textContent = '退出登录';
+    accountAction('/api/account/logout', '退出登录失败', function (data) {
+      showAcctNotice('warn', data.message || '已退出登录。');
+    });
+  });
+
+  // ---------------------------------------------------------------- 轮询
+  function refresh(first) {
+    return request('/api/state').then(function (data) {
+      var wasFirstSync = first || !state;
+      state = data;
+      renderIps();
+      if (wasFirstSync || !dirty) {
+        fillForm(data.config);
+        fillFriends(data.friends, data.friends_scan, wasFirstSync);
+      }
+      // 这两块要么只读、要么自带脏标记，每轮都画不会盖掉用户输入
+      fillAccount(data.account);
+      fillScan(data.friends_scan);
+      render();
+    }).catch(function (err) {
+      $('svcDot').className = 'dot err';
+      $('svcText').textContent = '无法连接服务';
+      strip('errStrip', '无法读取服务状态：' + err.message);
+    });
+  }
+
+  // ---------------------------------------------------------------- 动作
+  function save(isLaunch) {
+    if (busy) { return Promise.resolve(); }
+    busy = true;
+    $('btnSave').disabled = true;
+    var stage = '好友名单';
+    // 顺序要紧：好友名单先过校验。它是「服务能不能起来」的前提（读不到名单，
+    // 抖音会话起不来），所以它不合法时连接设置一个字都不动，更不能带着坏配置点启动。
+    var friendStep = (friendReady && friendModel && friendDirty)
+      ? request('/api/friends', { method: 'POST', body: friendsPayload() })
+      : Promise.resolve(null);
+
+    return friendStep.then(function (friendData) {
+      if (friendData) {
+        strip('friendErr', '');
+        var notes = friendData.warnings ? friendData.warnings.slice() : [];
+        strip('friendWarn', notes.length ? ('好友名单已保存，另需说明：\n· ' + notes.join('\n· ')) : '');
+        friendDirty = false;
+        renderFriends();
+      }
+      stage = 'server';
+      var path = isLaunch ? '/api/launch' : '/api/config';
+      return request(path, { method: 'POST', body: formValues() }).then(function (data) {
+        return { friends: friendData, server: data };
+      });
+    }).then(function (both) {
+      var data = both.server;
+      markClean();
+      if (data.restart && data.restart.length) {
+        strip('restartStrip', '以下改动需重启服务方可生效：' + data.restart.join('、') + '。');
+      }
+      if (data.warnings && data.warnings.length) {
+        strip('warnStrip', '已保存，另有两点提醒：\n· ' + data.warnings.join('\n· '));
+      } else {
+        strip('warnStrip', '');
+      }
+      if (isLaunch) {
+        launched = true;
+        strip('welcome', '配置已保存，正在启动服务…（将弹出一个抖音浏览器窗口，请保持打开）');
+        $('btnSave').textContent = '正在启动…';
+        return refresh();
+      }
+      toast(both.friends ? '好友名单与连接设置均已保存' : '已保存');
+      return refresh();
+    }).catch(function (err) {
+      strip('errStrip', stage === '好友名单'
+        ? ('好友名单未能保存，连接设置也未改动 —— ' + err.message)
+        : ('保存失败：' + err.message));
+      $('btnSave').disabled = false;
+    }).then(function () {
+      busy = false;
+      if (!isLaunch) { $('btnSave').disabled = false; }
+    });
+  }
+
+  // ---------------------------------------------------------------- 事件
+  FIELDS.forEach(function (name) {
+    if (name === 'open_page') { return; }
+    var el = $('f-' + name);
+    el.addEventListener('input', function () { markDirty(); renderAddress(); });
+    el.addEventListener('change', function () { markDirty(); });
+  });
+  $('openRow').addEventListener('change', markDirty);
+  $('f-port').addEventListener('input', renderAddress);
+  $('f-token').addEventListener('input', function () {
+    $('tokenOut').textContent = this.value || '（空）';
+  });
+
+  $('btnSave').addEventListener('click', function () {
+    if (friendBroken) {
+      // 读不懂原文还硬启动，只会得到一句「抖音会话没起来」
+      strip('errStrip', 'config.json 当前无法读取，服务将因读不到好友名单而启动失败。'
+        + '请先修复该文件（或改名留档）后再点击此处。');
+      return;
+    }
+    var first = state && state.first_run && state.awaiting_launch;
+    save(!!first);
+  });
+  $('btnReload').addEventListener('click', function () {
+    if (dirty && !window.confirm('存在未保存的改动，重新读取将丢失这些改动。是否继续？')) { return; }
+    dirty = false;
+    refresh(true);
+  });
+  $('btnToken').addEventListener('click', function () {
+    if (!window.confirm('确定更换新令牌？手表端须同步更新，否则无法连接。')) { return; }
+    request('/api/token', { method: 'POST', body: formValues() }).then(function (data) {
+      $('f-token').value = data.token;
+      $('tokenOut').textContent = data.token;
+      markDirty();
+      strip('warnStrip', '令牌已更换，请同步更新手表端配置（可使用上方的「复制」按钮）。重启服务后生效。');
+      return refresh();
+    }).catch(function (err) { strip('errStrip', '更换令牌失败：' + err.message); });
+  });
+  $('ipList').addEventListener('click', function (ev) {
+    var chip = ev.target.closest ? ev.target.closest('.ipchip') : null;
+    if (!chip || !chip.dataset.ip) { return; }
+    selectedIp = chip.dataset.ip;
+    renderIps();
+  });
+  document.addEventListener('click', function (ev) {
+    var btn = ev.target.closest ? ev.target.closest('[data-copy]') : null;
+    if (!btn) { return; }
+    var text = $(btn.dataset.copy).textContent;
+    var done = function () { toast('已复制：' + text); };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done, function () { toast('复制失败，请手动选择复制', 'error'); });
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) { toast('复制失败，请手动选择复制', 'error'); }
+      document.body.removeChild(ta);
+    }
+  });
+  window.addEventListener('beforeunload', function (ev) {
+    if (dirty) { ev.preventDefault(); ev.returnValue = ''; }
+  });
+
+  // ============================================================== 手表端好友
+  // 这一块只干一件事：决定 `config.json` 的 `friends` 里写谁。文件里别的键一概不碰
+  // —— 服务端 `bridge/watch_friends.py` 保证这一点，这里只要把勾选结果递上去。
+  var friendModel = null;   // { enabled: [...], locked: bool }
+  var friendReady = false;  // 文件读得懂、可以改
+  var friendBroken = false; // 文件坏了 —— 连「启动服务」都得拦住（服务会起不来）
+  var friendDirty = false;  // 只在自己真动过时才写文件（免得白留一份 .bak）
+  var friendRoster = null;  // 最近一次从抖音读到的 [{name, preview}]；null = 还没读过
+  var friendKnown = [];     // 列表里铺过的所有名字（文件里那份 ∪ 读到过的）。
+                            // 取消勾选只是「不启用」，人不该从列表里消失 —— 否则第一次
+                            // 读取之前取消一位，就没地方再加回来了。
+  var scanBusy = false;
+
+  // 名字匹配：文件里的名字和抖音里读到的常常不完全一样（用户会给自己加备注，
+  // 比如「阿华」）。所以先按「去掉所有空白」比一遍，再退回
+  // 「一方是另一方的前缀」—— 这比让用户自己改名对得整齐靠谱。
+  function normName(text) {
+    return String(text == null ? '' : text).replace(/\s+/g, '');
+  }
+  function findRoster(name, roster) {
+    var key = normName(name);
+    if (!key || !roster) { return null; }
+    var i;
+    for (i = 0; i < roster.length; i += 1) {
+      if (normName(roster[i].name) === key) { return roster[i]; }
+    }
+    for (i = 0; i < roster.length; i += 1) {
+      var other = normName(roster[i].name);
+      if (other && (other.indexOf(key) === 0 || key.indexOf(other) === 0)) { return roster[i]; }
+    }
+    return null;
+  }
+
+  function friendsPayload() {
+    return { enabled: friendModel ? friendModel.enabled.slice() : [] };
+  }
+
+  // 这个名字在已知名单里出现过吗？判定口径与 findRoster 一致（去空白 + 前缀），
+  // 免得「阿华」和「阿华」这样同一人被铺成两行。
+  function knownHas(name) {
+    var key = normName(name);
+    if (!key) { return false; }
+    var i;
+    for (i = 0; i < friendKnown.length; i += 1) {
+      var other = normName(friendKnown[i]);
+      if (other === key || (other && (other.indexOf(key) === 0 || key.indexOf(other) === 0))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // 把这一轮读到的人并进已知名单。返回「真的多了人没有」。
+  function mergeKnown(items) {
+    var grew = false;
+    (items || []).forEach(function (item) {
+      if (!knownHas(item.name)) { friendKnown.push(item.name); grew = true; }
+    });
+    return grew;
+  }
+
+  function friendRowHtml(name, checked, roster) {
+    var hit = roster ? findRoster(name, roster) : null;
+    // 只在这一轮真读到过东西、却唯独没有他的时候才说「没读到」——
+    // 还没读过的时候说这个只会让人以为人丢了。
+    var missing = !!roster && !hit;
+    var preview = hit ? (hit.preview || '') : '';
+    var locked = friendModel && friendModel.locked;
+    return '<label class="friendrow' + (checked ? '' : ' off') + (missing ? ' missing' : '') + '" data-name="'
+      + escapeHtml(name) + '">'
+      + '<input type="checkbox"' + (checked ? ' checked' : '') + (locked ? ' disabled' : '') + '>'
+      + '<span class="fn">' + escapeHtml(name) + '</span>'
+      + (missing ? '<span class="tag">本次未读到</span>' : '')
+      + '<span class="fp" title="' + escapeHtml(preview) + '">' + escapeHtml(preview) + '</span>'
+      + '</label>';
+  }
+
+  function renderFriends() {
+    if (!friendModel) { return; }
+    var roster = (friendRoster && friendRoster.length) ? friendRoster : null;
+    // 铺的是「已知名单」而不是「已启用」：取消勾选只是退成未勾（模型里去掉），
+    // 那一行留在原地，随时能再勾回来。
+    var html = friendKnown.map(function (name) {
+      return friendRowHtml(name, friendModel.enabled.indexOf(name) >= 0, roster);
+    });
+    if (!html.length) {
+      html.push('<div class="empty">名单为空 —— 请点击上方「从抖音读取好友」，'
+        + '读取私信列表后再勾选。</div>');
+    }
+    $('friendList').innerHTML = html.join('');
+    $('friendCount').textContent = friendModel.enabled.length;
+    $('friendHint').textContent = friendModel.locked
+      ? (state && state.friends ? state.friends.readonly_reason : '')
+      : (state && state.friends ? state.friends.hint : '');
+  }
+
+  // 一行的勾选变化：直接改模型，然后重画（列表不长，重画比 diff 划算，
+  // 而且重画不会丢焦点 —— 这里没有输入框）。
+  $('friendList').addEventListener('change', function (ev) {
+    if (!friendModel || friendModel.locked) { return; }
+    var row = ev.target.closest ? ev.target.closest('.friendrow') : null;
+    if (!row || !row.dataset.name) { return; }
+    var name = row.dataset.name;
+    var at = friendModel.enabled.indexOf(name);
+    if (ev.target.checked) {
+      if (at < 0) { friendModel.enabled.push(name); }
+    } else if (at >= 0) {
+      friendModel.enabled.splice(at, 1);
+    }
+    markFriendDirty();
+    renderFriends();
+  });
+
+  function markFriendDirty() {
+    friendDirty = true;
+    markDirty();
+  }
+
+  // ------------------------------------------------------------ 从抖音读
+  function fillScan(info) {
+    if (!info) { return; }
+    scanBusy = !!info.running;
+    // 名单变了才重画（重画会把列表滚回顶部）。用户自己的勾选存在 friendModel 里，
+    // 重画不会丢。
+    if (Array.isArray(info.items) && info.items.length) {
+      var changed = JSON.stringify(info.items) !== JSON.stringify(friendRoster || []);
+      friendRoster = info.items;
+      if (mergeKnown(info.items)) { changed = true; }
+      if (changed) { renderFriends(); }
+    }
+    renderScan(info);
+  }
+
+  function renderScan(info) {
+    var scan = info || (state && state.friends_scan) || {};
+    var note = $('scanNote');
+    var btn = $('btnScan');
+    var cancel = $('btnScanCancel');
+    if (cancel) { cancel.hidden = !scanBusy; }
+    if (btn) {
+      btn.disabled = scanBusy || (friendModel && friendModel.locked) || scan.available === false;
+      btn.textContent = friendRoster ? '重新读取' : '从抖音读取好友';
+    }
+    var lines = [];
+    if (scanBusy) {
+      lines.push(scan.cancelling
+        ? '正在取消（等待本轮滚动结束）…'
+        : '正在滚动抖音私信列表，期间该窗口会自动滚动，请勿在其上操作。');
+    } else if (scan.state === 'failed' || scan.state === 'cancelled') {
+      lines.push(scan.message || '读取失败。');
+    } else if (friendRoster) {
+      lines.push((scan.scanned_at ? ('上次读取 ' + scan.scanned_at + ' · ') : '')
+        + '读取到 ' + friendRoster.length + ' 个会话。');
+    } else {
+      lines.push('尚未读取。抖音私信列表仅包含有过聊天记录的会话，因此读取结果即为这些会话；'
+        + '如需包含较久未联系的会话，请先在抖音窗口中向下滚动列表，然后再次点击读取。');
+    }
+    if (scan.available === false) {
+      lines.push('（服务尚未接入抖音会话 —— 请等待其启动完成后再试。）');
+    }
+    note.textContent = lines.filter(Boolean).join(' ');
+  }
+
+  $('btnScan').addEventListener('click', function () {
+    if (scanBusy) { return; }
+    request('/api/friends/scan', { method: 'POST', body: {} }).then(function (data) {
+      if (data.friends_scan) { fillScan(data.friends_scan); }
+      strip('friendErr', '');
+    }).catch(function (err) {
+      strip('friendErr', '无法读取好友列表：' + err.message);
+    });
+  });
+  $('btnScanCancel').addEventListener('click', function () {
+    request('/api/friends/cancel', { method: 'POST', body: {} }).then(function (data) {
+      if (data.friends_scan) { fillScan(data.friends_scan); }
+    }).catch(function (err) {
+      strip('friendErr', '取消失败：' + err.message);
+    });
+  });
+
+  // ------------------------------------------------------------ 状态行
+  function pathRows() {
+    var f = state && state.friends;
+    return [
+      ['服务设置文件', '<span title="' + escapeHtml(state ? state.config_path : '') + '">'
+        + escapeHtml(shorten(state ? state.config_path : '')) + '</span>'],
+      ['好友名单文件', f
+        ? '<span title="' + escapeHtml(f.path) + '">' + escapeHtml(shorten(f.path)) + '</span>'
+        : '—'],
+      ['本页地址', escapeHtml(state ? state.url : '')],
+    ];
+  }
+
+  function friendsRow(info) {
+    if (!info) { return '—'; }
+    if (info.error) { return '<b>config.json 无法读取</b> —— 服务将无法启动，见第 3 块'; }
+    var count = info.enabled_count || 0;
+    return count + ' 位' + (info.exists ? '' : '（尚无此文件）');
+  }
+
+  function fillFriends(info, scan, force) {
+    var card = $('friendCard');
+    if (!info) { card.hidden = true; return; }
+    card.hidden = false;
+    $('friendPathOut').textContent = shorten(info.path);
+    $('friendPathOut').title = info.path;
+
+    var badge = $('friendBadge');
+    if (info.error) {
+      badge.textContent = '读取失败';
+      badge.className = 'badge file bad';
+    } else if (!info.exists) {
+      badge.textContent = '尚无此文件';
+      badge.className = 'badge file bad';
+    } else {
+      badge.textContent = '已在用';
+      badge.className = 'badge file';
+    }
+
+    friendBroken = !!info.error;
+    friendReady = !info.error;
+    $('friendBody').hidden = !friendReady;
+    if (!friendReady) {
+      friendModel = null;
+      strip('friendErr', info.error + '\n此区域暂时无法修改：本区域写入的是该文件中的名单，无法解析原文则不能确定'
+        + '还需要保留哪些键。请手动修复该文件（或改名留档）后刷新本页。文件位置：' + info.path);
+      strip('friendWarn', '');
+      return;
+    }
+    strip('friendErr', '');
+
+    // 只在还没有模型、或者用户点了「重新读取」时才重建 —— 平时不能拿服务端的值
+    // 盖掉用户正在勾的东西。
+    if (friendModel === null || force) {
+      friendModel = {
+        enabled: (info.enabled || []).map(String),
+        locked: !info.editable
+      };
+      friendKnown = friendModel.enabled.slice();
+      friendDirty = false;
+      renderFriends();
+    }
+    if (scan) { fillScan(scan); }
+    if (!info.editable) {
+      strip('friendWarn', info.readonly_reason || '该文件当前为只读状态。');
+    }
+  }
+
+  refresh(true);
+  setInterval(function () { if (!busy) { refresh(false); } }, 2000);
+})();
+</script>
+</body>
+</html>
