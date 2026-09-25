@@ -23,6 +23,32 @@ SEARCH_INPUTS = (
     'input[aria-label*="搜索"]',
     '[role="textbox"][aria-label*="搜索"]',
 )
+# 搜索面板的容器。**它是「搜索到底生效没有」的判据**，用来决定搜索结果该去哪
+# 一套 DOM 里找（见 app/douyin.py::_search_result）：
+#   · 面板在 —— 搜索生效，结论就在面板里；左侧会话列表此时被面板盖住，
+#     再去扫它是白扫（实测 13.2 秒），还可能点到隐藏的残留行。
+#   · 面板不在 —— 搜索没生效（页面还停在会话列表），才该回退去扫会话行。
+# 注意这是「容器」级 selector，`[class*="SearchPanel"]` 会连结果行容器一起命中，
+# 但判据只关心「有没有可见的面板元素」，语义上并不冲突。
+SEARCH_PANEL_MARKERS = (
+    '[class*="SearchPanelcontainer"]',
+    '[class*="SearchPanelContainer"]',
+    '[class*="SearchPanel"]',
+)
+# 搜索框里的「取消」按钮 —— 抖音自己的退出搜索态入口。
+#
+# 这是唯一可靠的**轻量**手段。2026-09-25 逐个实测过五种做法，全都退不出搜索态：
+# 清空搜索框、按 Escape、按 Escape 三次、按 Enter、点页面空白处、`page.go_back()`；
+# 观察 1.2~1.5 秒后面板照旧挂着、会话行照旧 0 个可见。只有这个按钮管用，而且只要
+# 0.14 秒 —— 对比重新加载整个私信页要 16.9 秒（还要额外等列表渲染）。
+#
+# 退出搜索态为什么重要：面板一旦挂上，左侧会话列表的 DOM 就被换成搜索相关的节点，
+# 读出来的「名字」是长度 12/16/11 的杂串（详见 `app/douyin.py::leave_search_mode`）。
+SEARCH_CANCEL_BUTTONS = (
+    '[class*="searchSearchInputsearch_cancel"]',
+    '[class*="SearchInputsearch_cancel"]',
+    '[class*="search_cancel"]',
+)
 CHAT_PANEL_MARKERS = (
     '[class*="RightPanelHeader"]',
     '[class*="chatHeader"]',

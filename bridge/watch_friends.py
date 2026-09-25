@@ -22,6 +22,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from app.names import normalize_name
+
 LOGGER = logging.getLogger("douyin_watch")
 
 CONFIG_NAME = "config.json"
@@ -79,6 +81,10 @@ def _clean_names(raw: Any) -> list[str]:
     只认「字符串列表」：页面上是一个个复选框，一位一个名字。早先那版还有个
     「一行一个名字」的多行文本框，所以这里能收字符串 —— 现在没有那个入口了，
     多一种输入形态就多一种能被写错的东西。
+
+    收名字用 `app.names.normalize_name` 而不是 `.strip()`：后者只去首尾，拦不住
+    `"某位好友\n前天"` 这种「名字里混进了会话时间」的脏数据。它还会被原样写回
+    落盘，从此搜不到 —— 2026-09-25 踩过，手表端表现为卡在搜索框里。
     """
     if not isinstance(raw, list):
         return []
@@ -86,7 +92,7 @@ def _clean_names(raw: Any) -> list[str]:
     for item in raw:
         if not isinstance(item, str):
             continue
-        name = item.strip()
+        name = normalize_name(item)
         if name and name not in names:
             names.append(name)
     return names

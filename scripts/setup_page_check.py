@@ -40,6 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.names import normalize_name  # noqa: E402
 from bridge import credentials, friend_scan, server_config, setup_web, watch_friends  # noqa: E402
 
 
@@ -76,7 +77,7 @@ def request(url: str, *, method: str = "GET", payload: dict | None = None,
         return exc.code, exc.read().decode("utf-8", "replace")
 
 
-def write_credential(path: Path, *, nickname: str = "qbw", login_ms: int = 1789477366888) -> None:
+def write_credential(path: Path, *, nickname: str = "示例账号", login_ms: int = 1789477366888) -> None:
     """造一份 storage-state.json。结构照 Playwright 那份来，cookie 值是假的。
 
     只用来验「读得出昵称 / 登录时间」这条路径，不参与任何真实请求。
@@ -314,6 +315,37 @@ def main() -> int:
             check("落盘也只有一个",
                   json.loads(task_path.read_text(encoding="utf-8"))["friends"] == ["小明"])
 
+            # 网页上抓来的名字常常连着「会话时间」：会话行里昵称和右侧的时间在同一个
+            # 块级容器里，`innerText` 会在两者之间插一个换行。只 `.strip()` 收不掉它，
+            # 这个名字落盘之后**搜不到** —— 手表端表现为卡在搜索框里（2026-09-25 踩过）。
+            status, text = request(base + "/api/friends", method="POST",
+                                   payload={"enabled": ["某位好友\n前天", "阿明\n前天", "阿明",
+                                                        "  阿华 3.12  "]},
+                                   headers={setup_web.CSRF_HEADER: "1"})
+            cleaned = json.loads(text).get("enabled")
+            check("名字里的换行和会话时间被收掉",
+                  status == 200 and cleaned == ["某位好友", "阿明", "阿华 3.12"], str(cleaned)[:160])
+            check("落盘的也是收干净的",
+                  json.loads(task_path.read_text(encoding="utf-8"))["friends"]
+                  == ["某位好友", "阿明", "阿华 3.12"])
+            check("读回来一致",
+                  watch_friends.load_friend_names(task_path) == ["某位好友", "阿明", "阿华 3.12"])
+
+            print("11b. 名字规范化：只取第一行，名字内部的空格留着")
+            for raw, want in [
+                ("某位好友\n前天", "某位好友"),
+                ("  阿华 3.12  ", "阿华 3.12"),
+                ("阿明\n前天\n昨天", "阿明"),
+                ("名字\t带\t制表符", "名字 带 制表符"),
+                ("", ""),
+                ("\n\n", ""),
+            ]:
+                got = normalize_name(raw)
+                check(f"{raw!r} → {want!r}", got == want, f"实际 {got!r}")
+            for bad in (None, 123, ["a"], {"a": 1}, True):
+                check(f"非字符串 {bad!r} 当没名字", normalize_name(bad) == "",
+                      f"实际 {normalize_name(bad)!r}")
+
             before = task_path.read_text(encoding="utf-8")
             for label, payload, keyword in [
                 ("一个都不勾", {"enabled": []}, "至少保留一位"),
@@ -362,14 +394,18 @@ def main() -> int:
             _wait_scan(slow)
             check("慢 reader 也能跑完", slow.state()["state"] == "done", slow.state()["state"])
 
+            # 最后两条是网页上真实的样子：昵称后面跟着会话时间（`innerText` 在块级
+            # 子元素之间插换行）。收干净后应当只剩名字，且与不带时间的那条算同一人。
             roster = [{"name": "小明", "preview": "晚安"}, {"name": " 小吴 ", "preview": "在吗"},
-                      {"name": "小明", "preview": "重复的"}, {"name": "", "preview": "没名字的"}]
+                      {"name": "小明", "preview": "重复的"}, {"name": "", "preview": "没名字的"},
+                      {"name": "某位好友\n前天", "preview": "在吗"},
+                      {"name": "小吴\n昨天", "preview": "带着时间的重复项"}]
             ok_scan = friend_scan.FriendScanner(lambda should_stop: roster)
             ok_scan.start()
             done = _wait_scan(ok_scan)
             check("跑完变成 done", done["state"] == "done", done["state"])
             names = [item["name"] for item in done["items"]]
-            check("名字去重、去空白、丢掉空名字", names == ["小明", "小吴"], str(names))
+            check("名字收干净、去重、丢掉空名字", names == ["小明", "小吴", "某位好友"], str(names))
             check("带出读取时刻", bool(done["scanned_at"]), str(done["scanned_at"]))
             check("报出耗时", isinstance(done["elapsed"], float), str(done["elapsed"]))
 
@@ -427,7 +463,7 @@ def main() -> int:
             acct = json.loads(text)["account"]
             check("state 带账号块", isinstance(acct, dict) and "login" in acct, str(acct)[:120])
             check("认出凭证文件", acct["exists"] is True and acct["path"] == str(cred_path), acct["path"])
-            check("读出昵称", acct["nickname"] == "qbw", acct["nickname"])
+            check("读出昵称", acct["nickname"] == "示例账号", acct["nickname"])
             check("读出登录时间",
                   acct["login_at"] == datetime.datetime.fromtimestamp(1789477366).strftime("%Y-%m-%d %H:%M:%S"),
                   acct["login_at"])

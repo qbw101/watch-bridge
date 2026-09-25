@@ -4,7 +4,7 @@
 这个脚本专门补那一层：真开一个 Chromium 去点、去勾、去读，然后回头看
 落盘的文件对不对 —— 覆盖的都是改这两块 HTML 时最容易碰坏的地方：
 
-  A. 初始渲染：真 config.json 的副本能不能把 7 位好友正确铺成勾选列表；
+  A. 初始渲染：脚本自带的示例名单能不能把 7 位好友正确铺成勾选列表；
   B. 取消勾一位再保存：落盘少一位，而**文件里不该凭空多出其它键**；
   C. 点「从抖音读取好友」：读到的会话能合进列表 —— 已勾的还勾着、没勾的补进来
      且不勾、已启用但这轮没读到的会被标「本次未读到」；
@@ -21,8 +21,9 @@
 跑法：
     python scripts/setup_page_ui_check.py
 
-不碰抖音、不碰 8787。项目根那份 config.json / storage-state.json 都只读不写 ——
-所有会写的东西都落在临时目录里，凭证也是现场造的假 cookie，「读好友」用假 reader。
+不碰抖音、不碰 8787。名单和凭证都是脚本自己造的假数据 —— 项目根那份
+`config.json` / `storage-state.json` **一概不读**，所有会写的东西都落在临时
+目录里，凭证也是现场造的假 cookie，「读好友」用假 reader。
 """
 
 from __future__ import annotations
@@ -55,14 +56,14 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 # 「从抖音读取好友」的假结果：走查用，不碰浏览器。
 # 刻意做成「不齐」的名单，好让三种状态一次看清：
-#   · 已启用的多数人原样对得上（小明、阿华 …）；
+#   · 已启用的多数人原样对得上（小明、阿华 3.12 …）；
 #   · 比已启用的多一位「新来的人」—— 演示「读到但没勾」；
 #   · 故意漏掉是启用的「小陈」—— 演示「已用但这次没读到」。
 FAKE_ROSTER = [
     {"name": "小明", "preview": "晚安"},
-    {"name": "阿华", "preview": "在吗"},
-    {"name": "小林", "preview": "[图片]"},
-    {"name": "小周", "preview": "明天见"},
+    {"name": "阿华 3.12", "preview": "在吗"},
+    {"name": "小林 6.09", "preview": "[图片]"},
+    {"name": "小周 11.05", "preview": "明天见"},
     {"name": "小吴", "preview": "哈哈"},
     {"name": "小郑", "preview": "到了"},
     {"name": "新来的人", "preview": "你好呀"},
@@ -141,9 +142,10 @@ with tempfile.TemporaryDirectory(prefix="watch-ui-exercise-") as tmp:
     # 那是运行数据、不进版本库，别人 clone 下来根本没有，测试会因此跑不起来
     # （而且会把本机的好友名字带进测试断言里）。
     # 这份示例刻意排成「比 FAKE_ROSTER 少一位『小陈』、多一位『新来的人』」，
-    # 好把「已用但没读到」「读到但没勾」两种行状态一次验到。
+    # 好把「已用但没读到」「读到但没勾」两种行状态一次验到。位数为 7，下面的
+    # 断言按这个数写。
     base_text = json.dumps({
-        "friends": ["小明", "阿华", "小林", "小陈", "小周", "小吴", "小郑"],
+        "friends": ["小明", "阿华 3.12", "小林 6.09", "小陈", "小周 11.05", "小吴", "小郑"],
     }, ensure_ascii=False, indent=2)
     task_path.write_text(base_text, encoding="utf-8")
     base_doc = json.loads(base_text)   # 原文件的键序，B 步要拿它对
@@ -195,7 +197,7 @@ with tempfile.TemporaryDirectory(prefix="watch-ui-exercise-") as tmp:
                   page.eval_on_selector_all("#friendList .friendrow:not(.off)", "e => e.length") == 7)
             check("已启用计数是 7", page.inner_text("#friendCount") == "7", page.inner_text("#friendCount"))
             names = page.eval_on_selector_all("#friendList .friendrow", "e => e.map(x => x.dataset.name)")
-            check("名字按文件里的顺序铺", names[:2] == ["小明", "阿华"], str(names[:3]))
+            check("名字按文件里的顺序铺", names[:2] == ["小明", "阿华 3.12"], str(names[:3]))
             check("还没读过时按钮是「从抖音读取好友」",
                   page.inner_text("#btnScan") == "从抖音读取好友", page.inner_text("#btnScan"))
             check("还没读过时不显示「取消」", not page.is_visible("#btnScanCancel"))

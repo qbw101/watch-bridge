@@ -19,6 +19,8 @@ from typing import Any, Callable
 
 from playwright.async_api import Page
 
+from app.names import normalize_name
+
 
 MESSAGE_LIST_SELECTOR = '[class*="messageMessageListlist"]'
 
@@ -57,6 +59,47 @@ async def wait_for_message_list(page: Page, timeout_ms: int = 3_000, interval_ms
         # 稳定后再留一点余量，让头像/表情图等元素挂载完成。
         await page.wait_for_timeout(150)
     return stable
+
+
+# 「左侧会话列表里有几个**可见**的会话行」。判据必须是可见性，不能只 count：
+# 页面停在搜索态时，`conversationConversationItem` 照样能数到几十个元素，但它们
+# 全部不可见（2026-09-25 实测：55 个命中、0 个可见）—— 那些是搜索面板相关的节点。
+CONVERSATION_VISIBLE_ROWS_JS = """() => {
+  const rows = document.querySelectorAll('[class*="conversationConversationItem"]');
+  let visible = 0;
+  for (const el of rows) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) continue;
+    const style = getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') continue;
+    visible++;
+  }
+  return visible;
+}"""
+
+
+async def wait_for_conversation_list(
+    page: Page, timeout_ms: int = 8_000, interval_ms: int = 200
+) -> bool:
+    """等左侧会话列表渲染出来并**可见**（重新加载私信页之后用）。
+
+    `open_private_messages` 保证的只是「搜索框挂上了」（那是登录判据），会话列表是
+    之后异步渲染的。不等就立刻读会读到 0 条 —— 2026-09-25 实测：重载私信页后立即
+    调 `read_conversations` 返回 0。
+
+    返回是否在超时前看到可见的会话行。
+    """
+    deadline = time.monotonic() + timeout_ms / 1000
+    while True:
+        try:
+            visible = int(await page.evaluate(CONVERSATION_VISIBLE_ROWS_JS) or 0)
+        except Exception:
+            visible = 0
+        if visible:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        await page.wait_for_timeout(interval_ms)
 
 
 READ_MESSAGES_JS = """(limit) => {
@@ -164,6 +207,10 @@ async def read_conversations(page: Page, limit: int = 30) -> list[dict[str, Any]
 
     抖音会话列表的 class 命名在不同版本有差异，这里做多 selector 兜底；
     读不到时返回空列表，由调用方回退到配置文件里的好友清单。
+
+    名字在 Python 这一侧收（`app.names.normalize_name`），JS 那边不做：那个
+    `titleEl.innerText` 会把昵称和右侧的时间拼成一段（块级子元素之间自动插换行），
+    整段当名字就会得到 `"某位好友\n前天"` 这种脏数据。
     """
     raw = await page.evaluate(
         """(limit) => {
@@ -172,9 +219,24 @@ async def read_conversations(page: Page, limit: int = 30) -> list[dict[str, Any]
             '[data-e2e="conversation-item"]',
             '[class*="conversation-item"]',
           ];
+          const visible = (el) => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) return false;
+            const style = getComputedStyle(el);
+            return style.display !== 'none' && style.visibility !== 'hidden';
+          };
           for (const selector of selectors) {
-            const rows = Array.from(document.querySelectorAll(selector));
-            if (!rows.length) continue;
+            const all = Array.from(document.querySelectorAll(selector));
+            if (!all.length) continue;
+            // 只认**可见**的行。判据用 `all.length`（这个 selector 在页面上存不存在）
+            // 决定要不要换下一个，用 `rows`（可见的那些）当数据 —— 两者不能混。
+            //
+            // 为什么非要卡可见性：页面停在搜索态时，同一个 selector 照样命中几十个
+            // 元素，但它们**全部不可见**（2026-09-25 实测：55 个命中、0 个可见），
+            // 读出来的「名字」是长度 12/16/11 的杂串 —— 那是搜索面板里的节点，不是
+            // 会话行。不清掉这一层，手表就会拿到一份错名单。
+            // 正常态下没有这个风险：实测 80 行命中、80 行全可见。
+            const rows = all.filter(visible);
             return rows.slice(0, limit).map((row) => {
               const titleEl = row.querySelector('[class*="conversationConversationItemtitle"]')
                 || row.querySelector('[class*="ConversationItemtitle"]')
@@ -190,7 +252,28 @@ async def read_conversations(page: Page, limit: int = 30) -> list[dict[str, Any]
         }""",
         limit,
     )
-    return raw or []
+    return _clean_items(raw)
+
+
+def _clean_items(raw: Any) -> list[dict[str, Any]]:
+    """把名字收干净（`app.names.normalize_name`），其余字段原样带过。
+
+    空名字的条目这里不滤 —— JS 那边 `.filter((item) => item.name)` 已经滤过一遍，
+    `read_all_conversations` 也不收空名字。这一层只管「名字干不干净」。
+    """
+    if not isinstance(raw, list):
+        return []
+    items: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        items.append(
+            {
+                "name": normalize_name(item.get("name")),
+                "preview": str(item.get("preview") or ""),
+            }
+        )
+    return items
 
 
 # 把会话列表往下滚一屏。抖音的 class 名一版一变，所以这里不按名字找滚动容器，
@@ -262,7 +345,7 @@ async def read_all_conversations(
             break
         added = 0
         for item in await read_conversations(page, limit=limit):
-            name = str(item.get("name") or "").strip()
+            name = normalize_name(item.get("name"))
             if not name or name in seen:
                 continue
             seen[name] = {"name": name, "preview": str(item.get("preview") or "")}

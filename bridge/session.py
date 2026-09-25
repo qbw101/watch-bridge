@@ -34,7 +34,13 @@ from app.sender import format_send_profile, reset_send_profile, send_douyin_stic
 
 from bridge import sticker_thumbs, watch_friends
 from bridge.fastopen import open_via_conversation_list
-from bridge.reader import read_all_conversations, read_conversations, read_messages, wait_for_message_list
+from bridge.reader import (
+    read_all_conversations,
+    read_conversations,
+    read_messages,
+    wait_for_conversation_list,
+    wait_for_message_list,
+)
 from bridge.sticker_store import LIBRARY_FILENAME, LibraryItem, StickerLibrary
 
 LOGGER = logging.getLogger("douyin_watch")
@@ -335,11 +341,55 @@ class DouyinBridge:
         )
         return {"friend": name, "rev": _revision(messages), "messages": messages}
 
+    async def _ensure_out_of_search(self) -> None:
+        """读会话列表前，先把页面从搜索态收回来。
+
+        搜索是**有状态的**：搜完不退出，SearchPanel 就一直挂着；而它一旦挂上，左侧
+        会话列表的 DOM 就被换成搜索相关的节点 —— 实测（2026-09-25）此时
+        `conversationConversationItem` 命中 55 个元素且**全部不可见**，读出来的
+        「名字」长度是 12/16/11 这种明显不是昵称的杂串，条数也从干净态的 64 掉到
+        44。也就是说，不清场就会把一份错名单交给手表。
+
+        实测也没有轻量手段能「靠自己」退出搜索态：清空搜索框、按 Escape、按 Enter、
+        点页面空白处、`page.go_back()`，五种做法各测一遍，1.2~1.5 秒后面板都照旧
+        挂着。唯一管用的是抖音自己的「取消」按钮（0.14 秒）—— 所以先点它；真点不动
+        才重新加载私信页（16.9 秒，顺带也能把列表刷新回完整状态）。
+
+        代价因此分两档：正常 0.14 秒，极端十几秒。`_open_target_once` 失败时已经会
+        清一次，这里是兜底。
+        """
+        assert self._page is not None
+        if self._chat is None:
+            return
+        try:
+            if not await self._chat.search_mode_active():
+                return
+        except Exception:  # noqa: BLE001
+            # 判断不出来就别乱动页面 —— `read_conversations` 自己还有一层
+            # 「只认可见行」的防线，最坏也只是读到空列表、由调用方回退名单。
+            LOGGER.debug("判断搜索态失败，按「不在搜索态」处理", exc_info=True)
+            return
+
+        assert self._chat is not None
+        if await self._chat.leave_search_mode():
+            LOGGER.info("页面停在搜索态，已点搜索框的「取消」收回来")
+            return
+
+        LOGGER.warning("点取消退不出搜索态，重新加载私信页后再读列表")
+        # `open_private_messages` 自己会查风控页与登录页，不必再单独 `verify_login`
+        # （那要再花 2~4 秒的检测时间，而重载本身已经够慢了）。
+        await open_private_messages(self._page)
+        if not await wait_for_conversation_list(self._page):
+            LOGGER.warning("重新加载后会话列表仍未渲染出可见行，本次读取可能为空")
+        # 页面重载了，之前记住的「当前会话」不再成立。
+        self._current_chat = None
+
     async def read_conversations(self, limit: int = 30) -> list[dict[str, Any]]:
         async with self._lock:
             if not self.ready:
                 raise BridgeError("抖音会话未就绪")
             assert self._page is not None
+            await self._ensure_out_of_search()
             return await read_conversations(self._page, limit=limit)
 
     async def read_all_conversations(
@@ -358,6 +408,7 @@ class DouyinBridge:
             if not self.ready:
                 raise BridgeError("抖音会话未就绪")
             assert self._page is not None
+            await self._ensure_out_of_search()
             return await read_all_conversations(
                 self._page, limit=limit, should_stop=should_stop, log=LOGGER.info
             )

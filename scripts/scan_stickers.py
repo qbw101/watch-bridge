@@ -53,7 +53,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.browser import open_douyin, open_private_messages, verify_login
 from app.config import load_settings
 from app.douyin import DouyinChat, RefreshYielded, first_visible
-from app.history import AlreadyRunningError, run_lock
+from app.lockfile import AlreadyRunningError, run_lock
 from app.selectors import (
     STICKER_BUTTONS,
     STICKER_PANELS,

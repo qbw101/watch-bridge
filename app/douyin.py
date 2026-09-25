@@ -5,7 +5,14 @@ import re
 
 from playwright.async_api import Locator, Page
 
-from app.selectors import CHAT_PANEL_MARKERS, MESSAGE_INPUTS, SEARCH_INPUTS
+from app.names import normalize_name
+from app.selectors import (
+    CHAT_PANEL_MARKERS,
+    MESSAGE_INPUTS,
+    SEARCH_CANCEL_BUTTONS,
+    SEARCH_INPUTS,
+    SEARCH_PANEL_MARKERS,
+)
 
 
 class PageOperationError(RuntimeError):
@@ -37,6 +44,28 @@ class RefreshYielded(RuntimeError):
 
 RETRY_DELAY_MS = 3_000
 
+# `_confirm_opened` 里「点击之后面板收起」的宽限期。点下搜索结果到面板关闭、聊天
+# 面板挂上是异步的，要几百毫秒；宽限期内不因「面板还在」下结论，超过它仍挂着，
+# 就说明那一下点击没生效（多半点到了搜索态下不可见的残留行），此时立刻报错 ——
+# 实测等满 15 秒预算只是把「点了没反应」拖成「手表转圈 15 秒」。
+PANEL_CLOSE_GRACE_MS = 2_500
+
+# 「搜索面板在不在」的一次性判据（见 `DouyinChat.search_mode_active`）。
+# 用 JS 而不是若干次 locator 往返：面板的 class 在 DOM 里有很多层，Python 侧逐个
+# selector 查可见性既慢、又可能正好命中隐藏的那一层。
+_SEARCH_PANEL_VISIBLE_JS = """(selectors) => {
+  for (const selector of selectors) {
+    for (const el of document.querySelectorAll(selector)) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      const style = getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      return true;
+    }
+  }
+  return false;
+}"""
+
 
 class DouyinChat:
     def __init__(
@@ -50,6 +79,9 @@ class DouyinChat:
         self.confirm_timeout_ms = confirm_timeout_ms
 
     async def open_target(self, name: str, retries: int = 1) -> None:
+        # 名单里理论上已经是干净名字（落盘前收过一道），这里再收一次：搜索框是
+        # 单行输入框，名字里带进换行会被浏览器转成空格，搜的就不是这个人了。
+        name = normalize_name(name)
         last_error: Exception | None = None
         for attempt in range(retries + 1):
             try:
@@ -75,13 +107,93 @@ class DouyinChat:
         await search.fill(name)
         await self.page.wait_for_timeout(1_500)
 
-        result = await self._search_result(name)
-        if result is None:
-            raise PageOperationError("搜索不到目标好友")
-        await result.click(force=True)
-        await self._confirm_opened(name)
+        try:
+            result = await self._search_result(name)
+            if result is None:
+                # 带上名字：日志里能一眼看出是哪个没搜到、长什么样，不用回头翻名单。
+                raise PageOperationError(f"搜索不到目标好友「{name}」")
+            await result.click(force=True)
+            await self._confirm_opened(name)
+        except Exception:
+            # 失败时先把搜索态收干净再抛出。搜索是有状态的，留着它会让**后续**每
+            # 一次读会话列表都拿到一份错名单（见 `leave_search_mode` 的说明）。
+            # 清场本身失败也不能顶掉手上的原始异常，所以这里不看它返回什么。
+            await self.leave_search_mode()
+            raise
 
     async def _search_result(self, name: str) -> Locator | None:
+        """找到目标好友那一行、可以点开聊天的控件。搜不到时返回 None。
+
+        搜索结果与左侧会话列表是**两套 DOM**，先决定去哪一套里找 —— 判据就是
+        「搜索面板在不在」，理由见 `search_mode_active`。
+        """
+        if await self.search_mode_active():
+            return await self._match_in_search_panel(name)
+        return await self._match_in_conversation_rows(name)
+
+    async def search_mode_active(self) -> bool:
+        """页面是否停在搜索态（搜索面板还挂着）—— 「搜索到底生效没有」的判据。
+
+        这个判据是 2026-09-25 加的，为的是砍掉一次 13 秒的白跑：搜不到一个名字
+        时，`_search_result` 原先不管搜索有没有生效，都会「先在结果面板找一遍，
+        再回退把左侧会话列表整个扫两遍」。而搜索一旦生效，左侧列表就被面板盖住
+        （实测 `conversationConversationItem` 首行可见性为 False），那两遍扫描注定
+        一无所获 —— 实测整段 14.5 秒里有 13.2 秒耗在这里，其中
+        `[class*="ConversationItem"]` 一个 selector 就命中 122 行、每行再乘 5 个
+        标题 selector，exact 与 group 各跑一遍。而面板里当时早就写着
+        「未搜索到相关内容」。
+
+        顺带修掉一个更坏的后果：搜索态下那些残留的会话行**不可见**，可一旦被
+        回退路径选中，就会以 `force=True` 点下去 —— 于是进入「点了没反应，再等满
+        15 秒 `_confirm_opened`」的路径。所以那条回退路径不只是慢，它还会误命中。
+
+        用一次 JS 判断「有没有任何一个可见的 SearchPanel 元素」，而不是在 Python
+        侧逐个 selector 往返：面板的 class 在 DOM 里有很多层，Python 侧的
+        `.first` 可能正好命中隐藏的那一层。
+        """
+        try:
+            return bool(
+                await self.page.evaluate(_SEARCH_PANEL_VISIBLE_JS, list(SEARCH_PANEL_MARKERS))
+            )
+        except Exception:
+            # 页面正在导航/关闭时 evaluate 会抛错。当作「面板不在」，让调用方走
+            # 回退路径 —— 那一路给出的失败信息更具体。
+            return False
+
+    async def leave_search_mode(self, timeout_ms: int = 1_500) -> bool:
+        """退出搜索态（点搜索框里的「取消」）。返回是否成功。
+
+        搜索是**有状态的**：搜完不退出，SearchPanel 就一直挂着；而它一旦挂上，
+        左侧会话列表的 DOM 就被换成搜索相关的节点 —— 实测（2026-09-25）此时
+        `conversationConversationItem` 命中 55 个元素且**全部不可见**，读出来的
+        「名字」长度是 12/16/11 这种明显不是昵称的杂串，条数也从干净态的 64 掉到
+        44。换句话说：留着搜索态，就会把一份错名单交给手表。
+
+        2026-09-25 逐个实测过五种轻量做法，**全都退不出来**（观察 1.2~1.5 秒后
+        面板照旧挂着）：清空搜索框、按 Escape、按 Escape 三次、按 Enter、点页面
+        空白处；`page.go_back()` 则会直接离开 /chat。只有抖音自己的「取消」按钮
+        管用，而且只要 0.14 秒 —— 对比重新加载整个私信页要 16.9 秒。所以这里点它。
+
+        点不动也**不要**在这里兜底重载：调用方（`_open_target_once` 的失败分支）
+        手上还有更重要的原始异常，重载的几秒会把它顶掉；读列表那条路另有兜底
+        （见 `bridge/session.py::_ensure_out_of_search`）。
+        """
+        for selector in SEARCH_CANCEL_BUTTONS:
+            locator = self.page.locator(selector).first
+            try:
+                if not await locator.count() or not await locator.is_visible():
+                    continue
+            except Exception:
+                continue
+            for force in (False, True):
+                try:
+                    await locator.click(timeout=timeout_ms, force=force)
+                    return True
+                except Exception:
+                    continue
+        return False
+
+    async def _match_in_search_panel(self, name: str) -> Locator | None:
         # Search mode renders a separate SearchPanel. Its "发消息" action is the
         # correct control; clicking the hidden conversation cache does not mount
         # the composer.
@@ -132,6 +244,14 @@ class DouyinChat:
             except Exception:
                 continue
 
+        return None
+
+    async def _match_in_conversation_rows(self, name: str) -> Locator | None:
+        """回退路径：搜索没生效时（页面还停在会话列表）直接在会话行里找。
+
+        只有 `search_mode_active()` 为假时才会走到这里 —— 见它的说明：搜索面板
+        一旦挂上，会话列表就被盖住，扫它既慢又会误命中不可见的残留行。
+        """
         # The nickname node can be hidden while its conversation row is visible.
         # Locate and click the complete row instead of relying on text visibility.
         row_selectors = (
@@ -196,12 +316,23 @@ class DouyinChat:
 
     async def _confirm_opened(self, name: str, timeout_ms: int | None = None) -> None:
         timeout = timeout_ms if timeout_ms is not None else self.confirm_timeout_ms
-        deadline = asyncio.get_running_loop().time() + timeout / 1000
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout / 1000
+        # 宽限期：点下去之后抖音要几百毫秒才收起搜索面板、把聊天面板挂上，所以
+        # 宽限期内不拿「面板还在」下结论。注意 `fastopen` 传的是 2 秒预算，比宽限
+        # 期还短，对它来说这一条不生效、行为与从前一致。
+        grace_until = min(deadline, loop.time() + PANEL_CLOSE_GRACE_MS / 1000)
         while True:
             last_error = await self._chat_open_error(name)
             if last_error is None:
                 return
-            if asyncio.get_running_loop().time() >= deadline:
+            now = loop.time()
+            # 搜索面板还挂着 = 那一下点击没生效（多半点到了搜索态下不可见的残留
+            # 行），页面不会自己变好。继续等只是把「点了没反应」拖成「手表转圈到
+            # 超时」—— 实测会完整耗掉 15 秒预算才抛错。
+            if now >= grace_until and await self.search_mode_active():
+                raise last_error
+            if now >= deadline:
                 raise last_error
             await self.page.wait_for_timeout(500)
 
@@ -318,12 +449,17 @@ async def _has_exact_text(locators: Locator, expected: str) -> bool:
 
 async def _text_equals(locator: Locator, expected: str) -> bool:
     try:
-        actual = (await locator.inner_text(timeout=500)).strip()
-        expected = expected.strip()
-        # 页面渲染可能把昵称拆成多行（如 "阿华\n7.25"），统一去掉
-        # 所有空白字符再比较，避免因空格/换行差异匹配失败。其余字符仍须
-        # 完全一致，因此不会把 "test" 误匹配成 "test1"。
-        return _strip_all_whitespace(actual) == _strip_all_whitespace(expected)
+        actual = await locator.inner_text(timeout=500)
+        # 两边都先收成「名字」（各取第一行，见 `app.names`）：网页上昵称和会话时间
+        # 常挤在同一个块级容器里，`innerText` 会在两者之间插一个换行
+        # （"昵称\n7.25"、"somebody\n前天"），而名单里存的是收干净的名字 ——
+        # 只比整段就会因为多出来的时间那行而失配。
+        # 再统一去掉所有空白字符，免得空格 / 换行的差异也算不相等。
+        # 放宽的只有「尾部多了时间」这一类：名字本身仍须逐字相同，所以
+        # "test" 依旧匹配不上 "test1"。
+        actual_key = _strip_all_whitespace(normalize_name(actual))
+        expected_key = _strip_all_whitespace(normalize_name(expected))
+        return actual_key == expected_key
     except Exception:
         return False
 

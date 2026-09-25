@@ -23,6 +23,8 @@ import threading
 import time
 from typing import Any, Callable
 
+from app.names import normalize_name
+
 LOGGER = logging.getLogger("douyin_watch")
 
 STATE_IDLE = "idle"
@@ -56,16 +58,20 @@ def _friendly(exc: BaseException) -> str:
 
 
 def _clean(raw: Any, max_items: int) -> list[dict[str, Any]]:
-    """只留名字非空、按名字去重、保序（最近聊过的在前面）。"""
+    """只留名字非空、按名字去重、保序（最近聊过的在前面）。
+
+    名字走 `app.names.normalize_name`（不是 `.strip()`）—— 会话行里昵称和时间
+    挤在同一段文本里（`innerText` 会插换行），光去首尾会把时间一起带进名单。
+    """
     if not isinstance(raw, list):
         return []
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
     for entry in raw:
         if isinstance(entry, str):
-            name, preview = entry.strip(), ""
+            name, preview = normalize_name(entry), ""
         elif isinstance(entry, dict):
-            name = str(entry.get("name") or "").strip()
+            name = normalize_name(entry.get("name"))
             preview = str(entry.get("preview") or "").strip()
         else:
             continue
